@@ -95,7 +95,7 @@ import { reapOrphanBlocks } from "./orphan-gc.js";
 import { conflictScanEnabled, isDesignBenign, scanClientPlugins, sniffScanClient } from "./thirdparty-scan.js";
 import { clearConflictEvents, recordConflict, summarizeConflicts } from "./conflict-watch.js";
 import { getStore, setGlobalSessionCommitListener } from "./persist.js";
-import { log as loggerLog, configureLogger, getLogPath, closeLogger, isStreamWriteError, isBenignSocketRaceError, enterSessionContext, muteStderrLeg, onFileLegLive } from "./logger.js";
+import { log as loggerLog, configureLogger, getLogPath, closeLogger, isStreamWriteError, isBenignSocketRaceError, enterSessionContext, muteStderrLeg, onFileLegLive, logTimestamp } from "./logger.js";
 import { queryLogLines } from "./web/logs-query.js";
 import { configFile, defaultLogFile, stateDir } from "./paths.js";
 import { atomicWriteInstanceFile, clearProxyInstanceFile, classifySameLanePeer, entryScriptFingerprint, entryShape, findSameLanePredecessor, findVerifiedSameLaneTwin, isPidAlive, listInstances, probePid, readProxyInstanceFile, registerInstanceAndWarn, sameInstanceShape, unregisterInstance, warnOnNewPeers, writeSpawnPortLog, type InstanceShape, type PidProbe, type ProxyInstanceFile, type RegistryEntry, type SameLanePeer } from "./instance.js";
@@ -663,7 +663,7 @@ export async function startServer(opts: ProxyOptions): Promise<http.Server> {
         const hint = ` — port ${opts.port} is already served by a same-build bili instance (pid ${earlyTwin.pid}, lane ${launcherLane}) — exiting before persistence initialization instead of hopping: the duplicate loses and the serving instance keeps serving; the next launch will attach to it (#4341/#3044). A spawner reads this exit as an adopt signal and attaches to the serving instance itself (#3654). ${holderFragment}.`;
         const listenLine = `listen failed: EADDRINUSE listen EADDRINUSE: address already in use ${opts.host}:${opts.port}${hint}`;
         logMsg(opts, "error", listenLine);
-        if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${new Date().toISOString()} [error] [v=${VERSION}] ${listenLine}`);
+        if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${logTimestamp()} [error] [v=${VERSION}] ${listenLine}`);
         await closeLogger();
         process.exit(eaddrinuseExitCode("twin-collision"));
     }
@@ -1455,7 +1455,7 @@ export async function startServer(opts: ProxyOptions): Promise<http.Server> {
         // #3654/#3116: a spawner's failure message points users at the per-port
         // log, but post-#2864 this child mutes its stderr leg into bili.log —
         // without this line that file stays 0 bytes and the diagnosis dies there.
-        if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${new Date().toISOString()} [error] [v=${VERSION}] ${listenLine}`);
+        if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${logTimestamp()} [error] [v=${VERSION}] ${listenLine}`);
         void (async () => {
             // #4762: terminal port-busy decisions die with a hint written from
             // REGISTRY evidence alone (pid alive ⇒ "serving"). Re-probe the
@@ -1465,7 +1465,7 @@ export async function startServer(opts: ProxyOptions): Promise<http.Server> {
                 const holderFragment = await probeHolderForHint({ origin: holderProbeOrigin(opts.host, lastTriedPort), knownPid: peer?.entry.pid });
                 const diagLine = `[eaddrinuse-diag] ${holderFragment}`;
                 log("error", diagLine);
-                if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${new Date().toISOString()} [error] [v=${VERSION}] ${diagLine}`);
+                if (launchToken !== undefined) writeSpawnPortLog(opts.port, `${logTimestamp()} [error] [v=${VERSION}] ${diagLine}`);
             }
             shuttingDown = true;
             server.close();
