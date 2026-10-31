@@ -90,6 +90,12 @@ Agent (Claude Code / Codex / Cursor / Aider ...)
    real model API (Anthropic / OpenAI / compatible)
 ```
 
+### Interactive walkthrough
+
+[![ASCII tree showing the active model input and its restorable sources](docs/images/context-explainer-en.png)](website/interactive/context-explainer.html)
+
+Download and open the standalone [English HTML](website/interactive/context-explainer.html) or [中文 HTML](website/interactive/context-explainer.zh-CN.html) in a browser to play the compression, restoration, and Pi delegation animations. The pages run offline; GitHub displays their source rather than executing them in the README. Token sizes and four-block promotions are teaching examples, not production thresholds or benchmark results.
+
 ### Context-management tools
 
 The proxy injects four context-management tools into the conversation; the model calls them itself as context grows, and the proxy executes `compress` server-side so folded ranges stay summarized in history until restored:

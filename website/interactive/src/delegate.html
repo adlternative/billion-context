@@ -1,0 +1,232 @@
+<div id="acp-delegate-explainer">
+  <style>
+    #acp-delegate-explainer { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * 1); color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #acp-delegate-explainer .ad-heading { padding-right: 90px; }
+    #acp-delegate-explainer .ad-controls { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .5); }
+    #acp-delegate-explainer .ad-between { display: flex; flex-wrap: wrap; justify-content: space-between; gap: calc(var(--font-size-base) * .5); }
+    #acp-delegate-explainer .ad-svg { width: 100%; display: block; }
+    #acp-delegate-explainer .ad-svg text { fill: var(--foreground); font-size: 12px; }
+    #acp-delegate-explainer .ad-svg .ad-muted { fill: var(--muted-foreground); }
+    #acp-delegate-explainer .ad-svg .ad-path { fill: none; stroke: var(--border); stroke-width: 1.25; }
+    #acp-delegate-explainer .ad-svg .ad-box { stroke: none; fill: var(--background); }
+    #acp-delegate-explainer .ad-svg .ad-ascii-border { fill: var(--muted-foreground); }
+    #acp-delegate-explainer .ad-foot { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .25); }
+  </style>
+  <div class="ad-heading"><h2>acp_delegate：把任务交给独立会话</h2><div class="text-small text-muted">ASCII / Pi / async=true</div></div>
+  <div class="ad-controls">
+    <div class="viz-controls"><button type="button" class="btn btn-primary" data-ad="play" aria-pressed="false">播放派发过程</button><button type="button" class="btn" data-ad="next">下一步</button><span class="text-small tabular-nums" data-ad="counter">0 / 7</span></div>
+    <label class="form-label" for="ad-progress">派发 -> 探索 -> 结果回流</label>
+    <input class="form-range" id="ad-progress" type="range" min="0" max="7" step="1" value="0" aria-label="委派任务执行进程">
+    <div data-ad="stage" class="text-small" aria-live="polite"></div>
+  </div>
+  <svg class="ad-svg" data-ad="svg" role="img" aria-labelledby="ad-title ad-desc"><title id="ad-title">主会话与子会话之间的任务和结果流转</title><desc id="ad-desc">主会话派发自包含任务，独立 pi 子进程探索文件，结果写入文件，回执与按需读取的正文回到主会话。</desc></svg>
+  <div class="ad-foot text-small text-muted"><span>上下文独立 · 工作目录默认共用 · 新任务通过 stdin 传入</span><span>模型选择：调用参数 → 角色配置 → 父模型；print / JSON 模式会改用同步等待。</span></div>
+  <div class="sr-only" data-ad="summary" role="status" aria-live="polite"></div>
+  <script>
+  (() => {
+    const stateStore = window.createExplainerState('delegate');
+    const root = document.getElementById('acp-delegate-explainer');
+    const get = key => root.querySelector('[data-ad="' + key + '"]');
+    const svg = get('svg'), slider = root.querySelector('#ad-progress');
+    const NS = 'http://www.w3.org/2000/svg';
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const stages = [
+      '主会话已有历史，准备派发一个自包含的调研任务。',
+      'acp_delegate：启动新的 pi 进程，并准备独立 session。',
+      '任务经 stdin 进入子会话；runId 立即返回主会话。',
+      '子会话读取代码；主会话可继续自己的工作。',
+      '搜索结果继续进入子会话的上下文。',
+      '子代理完成，结论与执行记录保存为文件。',
+      'acp_delegate_wait：状态、路径与短预览返回主会话。',
+      'read 结果文件：完整结论进入主会话，探索日志保留在子会话。'
+    ];
+    let step = 0, playing = false, timer = null, raf = null, lastWidth = 0, view = null, signature = '';
+    function n(tag, attrs = {}, content, parent = svg) {
+      const node = document.createElementNS(NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (content !== undefined) node.textContent = content;
+      parent.appendChild(node); return node;
+    }
+    function label(x, y, content, attrs = {}, parent = svg) { return n('text', { x, y, ...attrs }, content, parent); }
+    function fit(node, value, max) {
+      let end = value.length;
+      node.textContent = value;
+      while (end && node.getComputedTextLength() > max) { end--; node.textContent = value.slice(0, end) + '…'; }
+      if (end < value.length) node.setAttribute('data-tooltip', value);
+    }
+    function items() {
+      const parent = [
+        { id: 'h1', title: '既有历史 1', sub: '主会话', type: 'neutral' },
+        { id: 'h2', title: '既有历史 2', sub: '主会话', type: 'neutral' },
+        { id: 'task', title: '当前任务', sub: '定位 401', type: 'task' }
+      ];
+      if (step >= 1) parent.push({ id: 'call', title: 'delegate 调用', sub: '自包含任务', type: 'task' });
+      if (step >= 2) parent.push({ id: 'run', title: 'runId 回执', sub: 'del_demo', type: 'task' });
+      if (step >= 3) parent.push({ id: 'continue', title: '继续主任务', sub: '与子任务并行', type: 'neutral' });
+      if (step >= 6) parent.push({ id: 'receipt', title: '完成回执', sub: '路径 + 短预览', type: 'result' });
+      if (step >= 7) parent.push({ id: 'full', title: '完整结论', sub: 'read(.out)', type: 'result' });
+      const child = [];
+      if (step >= 2) child.push({ id: 'role', title: '角色 / 系统', sub: 'researcher', type: 'task' }, { id: 'child-task', title: '任务说明', sub: '调查 401 原因', type: 'task' });
+      if (step >= 3) child.push({ id: 'read', title: '读取代码', sub: 'auth.ts 片段', type: 'work' });
+      if (step >= 4) child.push({ id: 'grep', title: '搜索结果', sub: '令牌刷新路径', type: 'work' });
+      if (step >= 5) child.push({ id: 'answer', title: '调查结论', sub: '原因 / 证据', type: 'result' });
+      return { parent, child };
+    }
+    function positions(list, width, top) {
+      const columns = Math.max(2, Math.floor((width + 8) / 100));
+      const tile = Math.min(108, (width - (columns - 1) * 8) / columns);
+      return { columns, height: Math.max(1, Math.ceil(list.length / columns)) * 58, nodes: list.map((item, i) => ({ ...item, x: (i % columns) * (tile + 8), y: top + Math.floor(i / columns) * 58, w: tile, h: 46 })) };
+    }
+    function tile(p, parent, ghost = false) {
+      const group = n('g', { transform: 'translate(' + p.x + ',' + p.y + ')', ...(ghost ? { 'data-flying': p.id, 'aria-hidden': 'true' } : { 'data-message': p.id }) }, undefined, parent);
+      const box = n('rect', { x: 0, y: 0, width: p.w, height: p.h, rx: 0, class: 'ad-box ad-' + p.type }, undefined, group);
+      const line = '+' + '-'.repeat(Math.max(1, Math.round(p.w / 7.2) - 2)) + '+';
+      [6, p.h].forEach(y => label(0, y, line, { textLength: p.w, lengthAdjust: 'spacing', class: 'ad-ascii-border', 'aria-hidden': 'true' }, group));
+      [18, 36].forEach(y => {
+        label(0, y, '|', { class: 'ad-ascii-border', 'aria-hidden': 'true' }, group);
+        label(p.w, y, '|', { class: 'ad-ascii-border', 'text-anchor': 'end', 'aria-hidden': 'true' }, group);
+      });
+      fit(label(p.w / 2, 18, p.title, { 'text-anchor': 'middle' }, group), p.title, p.w - 18);
+      fit(label(p.w / 2, 36, p.sub, { 'text-anchor': 'middle', class: 'ad-muted' }, group), p.sub, p.w - 18);
+      return { ...p, group, box };
+    }
+    function arrow(x1, y1, x2, y2, text, extra = {}) {
+      const middle = (y1 + y2) / 2;
+      const path = n('path', { d: 'M' + x1 + ',' + y1 + ' V' + middle + ' H' + x2 + ' V' + y2, class: 'ad-path', ...extra });
+      label(x2, y2 + 4, y2 >= y1 ? 'v' : '^', { 'text-anchor': 'middle', class: 'ad-muted' });
+      if (Math.abs(x1 - x2) > 5) label(x2, middle + 4, '+', { 'text-anchor': 'middle', class: 'ad-muted' });
+      if (text) label((x1 + x2) / 2 + 7, (y1 + y2) / 2 - 5, text, { class: 'ad-muted' });
+      return path;
+    }
+    function paint() {
+      if (raf) cancelAnimationFrame(raf); raf = null;
+      const width = Math.max(280, root.getBoundingClientRect().width), small = width < 520;
+      lastWidth = width;
+      const all = items();
+      const parent = positions(all.parent, width - 4, 37);
+      const bridgeY = parent.height + 73;
+      const childTop = bridgeY + 84;
+      const child = positions(all.child, width - 4, childTop + 31);
+      const filesY = childTop + child.height + 80;
+      const height = filesY + (small ? 123 : 89);
+      svg.replaceChildren();
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height); svg.setAttribute('width', width); svg.setAttribute('height', height); svg.dataset.animating = 'false';
+      n('title', { id: 'ad-title' }, 'acp_delegate · ' + stages[step]);
+      n('desc', { id: 'ad-desc' }, '主会话包含：' + all.parent.map(i => i.title).join('、') + '。子会话包含：' + all.child.map(i => i.title).join('、') + '。工作目录默认共用。');
+      const defs = n('defs');
+      const marker = n('marker', { id: 'ad-arrow', viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 6, markerHeight: 6, orient: 'auto' }, undefined, defs);
+      n('path', { d: 'M1,1 L7,4 L1,7', fill: 'none', stroke: 'var(--muted-foreground)', 'stroke-width': 1.2 }, undefined, marker);
+      label(2, 16, '主会话 · 已有 pi 进程');
+      const parentG = n('g', { 'data-context': 'parent', role: 'group', 'aria-label': '主会话模型输入' });
+      const nodes = new Map();
+      parent.nodes.forEach(p => nodes.set(p.id, tile(p, parentG)));
+      const process = { id: 'process', x: 2, y: bridgeY, w: small ? width - 4 : 250, h: 48, title: 'spawn(node, pi CLI)', sub: '独立进程 / 独立 session', type: step >= 1 ? 'task' : 'neutral' };
+      const processNode = tile(process, svg);
+      if (!small) {
+        label(274, bridgeY + 18, 'task → stdin', { class: 'ad-muted' });
+        fit(label(274, bridgeY + 39, '模型 / 工具 / cwd 作为启动配置', { class: 'ad-muted' }), '模型 / 工具 / cwd 作为启动配置', width - 278);
+      }
+      const childLabel = '子会话 · ' + (step < 2 ? '等待启动' : step >= 5 ? '已完成' : '独立上下文');
+      label(2, childTop + 10, childLabel);
+      const childG = n('g', { 'data-context': 'child', role: 'group', 'aria-label': '子会话模型输入' });
+      child.nodes.forEach(p => nodes.set(p.id, tile(p, childG)));
+      if (!child.nodes.length) fit(label(2, childTop + 58, '角色提示词 + 本次任务 + 自行获取的项目资料', { class: 'ad-muted' }), '角色提示词 + 本次任务 + 自行获取的项目资料', width - 4);
+      const folderW = small ? width - 4 : 250;
+      const code = { id: 'workspace', x: 2, y: filesY, w: folderW, h: 48, title: '共用工作目录', sub: '代码文件 / 项目规则', type: 'neutral' };
+      const codeNode = tile(code, svg);
+      const result = { id: 'files', x: small ? 2 : 278, y: small ? filesY + 62 : filesY, w: small ? width - 4 : Math.max(180, width - 282), h: 48, title: step >= 5 ? 'del_demo.out' : '结果文件（待完成）', sub: '.out / .activity / .session.jsonl', type: step >= 5 ? 'result' : 'neutral' };
+      const fileNode = tile(result, svg);
+      const paths = [];
+      if (step >= 1) {
+        const call = nodes.get('call');
+        paths.push({ id: 'spawn', path: arrow(call.x + call.w / 2, call.y + call.h, process.x + process.w / 2, process.y - 3) });
+      }
+      if (step >= 2) {
+        const task = nodes.get('child-task');
+        paths.push({ id: 'task', path: arrow(process.x + process.w / 2, process.y + process.h, task.x + task.w / 2, task.y - 3) });
+      }
+      if (step >= 3) {
+        const read = nodes.get('read');
+        paths.push({ id: 'workspace', path: arrow(code.x + code.w / 2, code.y - 3, read.x + read.w / 2, read.y + read.h + 3) });
+      }
+      view = { width, height, nodes, process: processNode, code: codeNode, file: fileNode, paths };
+      slider.value = step; slider.setAttribute('aria-valuetext', stages[step]);
+      get('counter').textContent = step + ' / 7'; get('stage').textContent = stages[step];
+      get('next').disabled = step === 7;
+      get('summary').textContent = stages[step];
+    }
+    function motion(before) {
+      if (reduced.matches || !before || !view || before.width !== view.width) return;
+      const current = view, overlay = n('g', { 'data-motion': 'true', 'aria-hidden': 'true' });
+      const flights = [];
+      function add(id, from, to, title, sub, type) {
+        if (!from || !to) return;
+        const p = { id, x: from.x, y: from.y, w: to.w, h: 46, title, sub, type };
+        const item = tile(p, overlay, true);
+        flights.push({ item, from, to });
+      }
+      if (step === 1) add('launch', current.nodes.get('call'), current.process, '启动 pi', '新进程 / 新 session', 'task');
+      if (step === 2) {
+        add('task-payload', current.process, current.nodes.get('child-task'), '任务说明', '调查 401 原因', 'task');
+        add('run-receipt', current.process, current.nodes.get('run'), 'runId 回执', 'del_demo', 'task');
+      }
+      if (step === 3) add('code-content', current.code, current.nodes.get('read'), '代码片段', 'auth.ts', 'work');
+      if (step === 4) add('search-content', current.code, current.nodes.get('grep'), '搜索结果', '令牌刷新路径', 'work');
+      if (step === 5) add('write-result', current.nodes.get('answer'), current.file, '结果落盘', '结论 / 活动 / 会话', 'result');
+      if (step === 6) add('wait-result', current.file, current.nodes.get('receipt'), 'wait 回执', '路径 + ≤500 字符', 'result');
+      if (step === 7) add('read-result', current.file, current.nodes.get('full'), '结果正文', 'read(del_demo.out)', 'result');
+      const incoming = [...current.nodes.values()].filter(n => !before.nodes.has(n.id));
+      incoming.forEach(n => n.group.setAttribute('opacity', '.15'));
+      svg.dataset.animating = 'true';
+      const started = performance.now(), duration = 1500;
+      function frame(t) {
+        if (view !== current || !root.isConnected) return;
+        const p = Math.min(1, (t - started) / duration), q = p * p * (3 - 2 * p);
+        for (const { item, from, to } of flights) {
+          const x = from.x + (to.x - from.x) * q;
+          const y = from.y + (to.y - from.y) * q;
+          item.group.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+          item.group.setAttribute('opacity', p > .82 ? Math.max(0, (1 - p) / .18) : 1);
+        }
+        incoming.forEach(n => n.group.setAttribute('opacity', .15 + .85 * q));
+        if (p < 1) raf = requestAnimationFrame(frame);
+        else { incoming.forEach(n => n.group.setAttribute('opacity', '1')); overlay.remove(); svg.dataset.animating = 'false'; raf = null; }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function save() {
+      if (!stateStore?.setWidgetState) return;
+      const state = { modelContent: { version: 1, view: 'acp-delegate-flow', step, event: stages[step], parentInputs: items().parent.map(i => i.id), childInputs: items().child.map(i => i.id) }, privateContent: { version: 1, step } };
+      signature = JSON.stringify(state);
+      try { Promise.resolve(stateStore.setWidgetState(state)).catch(() => {}); } catch (_) {}
+    }
+    function stop() { playing = false; clearTimeout(timer); timer = null; get('play').textContent = step === 7 ? '从头播放' : '播放派发过程'; get('play').setAttribute('aria-pressed', 'false'); }
+    function go(n, animate = true, persist = true) {
+      const before = view; step = Math.max(0, Math.min(7, Math.round(n))); paint(); if (animate) motion(before); if (persist) save();
+      if (!playing) stop();
+    }
+    function tick() {
+      if (!playing || !root.isConnected) return;
+      if (step === 7) { stop(); save(); return; }
+      go(step + 1, true, false);
+      timer = setTimeout(tick, 1950);
+    }
+    function restore(state) {
+      const p = state?.privateContent;
+      if (p?.version !== 1 || !Number.isInteger(p.step)) return false;
+      stop(); step = Math.max(0, Math.min(7, p.step)); paint(); return true;
+    }
+    slider.addEventListener('input', () => { stop(); go(Number(slider.value)); });
+    get('next').addEventListener('click', () => { stop(); go(step + 1); });
+    get('play').addEventListener('click', () => {
+      if (playing) { stop(); save(); return; }
+      if (step === 7) go(0, false, false);
+      playing = true; get('play').textContent = '暂停'; get('play').setAttribute('aria-pressed', 'true'); save(); tick();
+    });
+    new ResizeObserver(() => { if (Math.abs(root.getBoundingClientRect().width - lastWidth) > 1) paint(); }).observe(root);
+    window.addEventListener('explainer:set_globals', event => { const state = event.detail?.globals?.widgetState; if (state && JSON.stringify(state) !== signature) restore(state); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && playing) { stop(); save(); } });
+    if (!restore(stateStore?.widgetState)) paint();
+  })();
+  </script>
+</div>

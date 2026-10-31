@@ -1,0 +1,606 @@
+<div id="bc-tree-explorer">
+  <style>
+    #bc-tree-explorer { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * 1); color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #bc-tree-explorer .bt-heading { padding-right: 90px; }
+    #bc-tree-explorer .bt-controls, #bc-tree-explorer .bt-fields { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .5); }
+    #bc-tree-explorer .bt-between { display: flex; flex-wrap: wrap; justify-content: space-between; gap: calc(var(--font-size-base) * .5); }
+    #bc-tree-explorer .bt-legend { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--font-size-base) * .5) calc(var(--font-size-base) * 1); }
+    #bc-tree-explorer .bt-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+    #bc-tree-explorer .bt-dot { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--foreground); background: var(--muted); }
+    #bc-tree-explorer .bt-stored { border-style: dashed; background: transparent; }
+    #bc-tree-explorer .bt-color { background: var(--viz-series-4); border: none; }
+    #bc-tree-explorer .bt-detail { min-height: calc(var(--font-size-base) * 1.5); overflow-wrap: anywhere; }
+    #bc-tree-explorer .bt-tree { display: block; width: 100%; }
+    #bc-tree-explorer .bt-tree text { fill: var(--foreground); font-size: 12px; }
+    #bc-tree-explorer .bt-tree .bt-muted { fill: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-edge { fill: none; stroke: var(--border); stroke-width: 1.25; }
+    #bc-tree-explorer .bt-tree .bt-edge-focus { stroke: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-edge-retrieve { stroke: var(--viz-series-4); stroke-width: 1.5; }
+    #bc-tree-explorer .bt-tree .bt-node { stroke: none; fill: transparent; }
+    #bc-tree-explorer .bt-tree .bt-archive { stroke-dasharray: 3 3; }
+    #bc-tree-explorer .bt-tree .bt-active { stroke: var(--foreground); }
+    #bc-tree-explorer .bt-tree .bt-selected { stroke: var(--foreground); stroke-width: 2; }
+    #bc-tree-explorer .bt-tree .bt-pending { stroke: var(--muted-foreground); stroke-dasharray: 2 3; }
+    #bc-tree-explorer .bt-tree .bt-t0, #bc-tree-explorer .bt-tree .bt-t1, #bc-tree-explorer .bt-tree .bt-t2, #bc-tree-explorer .bt-tree .bt-t3, #bc-tree-explorer .bt-tree .bt-taken { fill: transparent; }
+    #bc-tree-explorer .bt-tree .bt-input-box { stroke: none; fill: var(--background); }
+    #bc-tree-explorer .bt-tree .bt-ascii-border { fill: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-input-focus + .bt-ascii-frame text { fill: var(--foreground); }
+    #bc-tree-explorer .bt-tree .bt-node-label-taken { fill: var(--viz-series-4); }
+    #bc-tree-explorer [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { #bc-tree-explorer * { animation: none !important; transition: none !important; } }
+  </style>
+
+  <div class="bt-heading">
+    <h2>上下文怎样进入模型</h2>
+    <div class="text-small text-muted">ASCII / 上方：当轮输入 / 下方：摘要树</div>
+  </div>
+
+  <div class="bt-controls">
+    <div class="viz-controls">
+      <button type="button" class="btn btn-primary" data-bt="play" aria-pressed="false">播放动画</button>
+      <button type="button" class="btn" data-bt="next">下一步</button>
+      <button type="button" class="btn" data-bt="jump-t1">首次 T1</button>
+      <button type="button" class="btn" data-bt="jump-t2">首次 T2</button>
+      <button type="button" class="btn" data-bt="jump-t3">首次 T3</button>
+    </div>
+    <div class="bt-between text-small"><label class="form-label" for="bt-progress">生长进程</label><span class="tabular-nums" data-bt="counter">16 / 75</span></div>
+    <input class="form-range" type="range" id="bt-progress" min="0" max="75" step="1" value="16" aria-label="树的生长进程">
+    <div data-bt="event" class="text-small" aria-live="polite">第 4 批原文即将收缩为 b4 摘要</div>
+    <div class="bt-between text-small tabular-nums"><span>累计新增原文 <span data-bt="history">250K</span> token</span><span>本轮可见 <span data-bt="visible">105K</span> token</span></div>
+  </div>
+
+  <svg class="bt-tree" data-bt="tree" role="img" aria-labelledby="bt-title bt-desc">
+    <title id="bt-title">T3 到 T2、T1 和原文的来源引用树</title>
+    <desc id="bt-desc">每条连线由摘要父块指向来源子块。实线节点本轮可见，虚线节点仅存档。选择节点可以查看其来源，并沿连线预览解压。</desc>
+  </svg>
+
+  <div class="bt-legend text-small">
+    <span>[id] 本轮可见</span>
+    <span>(id) 仅存档</span>
+    <span>* 当前选择 / 流动</span>
+    <span data-bt="scope" class="text-muted">完整来源树</span>
+  </div>
+
+  <div class="bt-fields">
+    <label class="form-label" for="bt-select">选择节点，追踪它的来源</label>
+    <select class="form-select" id="bt-select" aria-label="选择摘要树节点"></select>
+    <div class="bt-detail text-small" data-bt="detail" aria-live="polite"></div>
+    <div class="viz-controls">
+      <button type="button" class="btn" data-bt="one">解压一层</button>
+      <button type="button" class="btn" data-bt="full">full：取回原文</button>
+      <button type="button" class="btn" data-bt="file">toFile：写文件</button>
+      <button type="button" class="btn" data-bt="read" hidden>read：读片段</button>
+    </div>
+  </div>
+  <div class="text-small text-muted">教学缩放：每批原文 50K → T1 摘要 1K；4 个摘要块 → 上层摘要 1K。</div>
+  <div class="sr-only" data-bt="status" role="status" aria-live="polite"></div>
+  <div class="sr-only" data-bt="input-a11y"></div>
+
+  <script>
+  (() => {
+    const stateStore = window.createExplainerState('compression');
+    const root = document.getElementById('bc-tree-explorer');
+    const el = key => root.querySelector('[data-bt="' + key + '"]');
+    const svg = el('tree'), slider = root.querySelector('#bt-progress'), picker = root.querySelector('#bt-select');
+    const NS = 'http://www.w3.org/2000/svg';
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const coarse = window.matchMedia('(pointer: coarse)');
+    const RAW = 50000, SUM = 1000, FIXED = 2000;
+    const copy = x => JSON.parse(JSON.stringify(x));
+    const fmt = n => n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'K' : String(n);
+    const ref = n => 'm' + String(n).padStart(5, '0');
+    const span = gs => ref(2 + (Math.min(...gs) - 1) * 5) + '–' + ref(6 + (Math.max(...gs) - 1) * 5);
+    const data = { groups: [], raw: [], active: [], blocks: [], next: 1 };
+    const events = [];
+    const snap = (kind, text, action = null) => events.push({ kind, text, action: copy(action), s: copy(data) });
+    const addBlock = (tier, groups, children) => {
+      const b = { id: 'b' + data.next++, tier, groups: [...groups], children: [...children], refs: span(groups) };
+      data.blocks.push(b); data.active.push(b.id); return b;
+    };
+    snap('start', '开始：原文逐批进入，尚未生成摘要');
+    for (let g = 1; g <= 17; g++) {
+      data.groups.push(g); data.raw.push(g);
+      snap('append', '新增第 ' + g + ' 批原文 · +50K token', { group: g });
+      if (data.raw.length > 1) {
+        const g0 = data.raw[0];
+        const a = { tier: 1, groups: [g0], children: [], target: 'b' + data.next };
+        snap('nudge', '候选：第 ' + g0 + ' 批原文 · 内核给范围，模型决定是否压缩', a);
+        snap('write', '模型写摘要：第 ' + g0 + ' 批原文 → ' + a.target + '（T1）', a);
+        data.raw.shift(); addBlock(1, [g0], []);
+        snap('fold', a.target + '（T1）形成；原文保留在它下方', a);
+        for (let tier = 1; tier < 3; tier++) {
+          const sources = data.active.map(id => data.blocks.find(b => b.id === id)).filter(b => b.tier === tier).slice(0, 4);
+          if (sources.length < 4) continue;
+          const ids = sources.map(b => b.id), groups = sources.flatMap(b => b.groups);
+          const next = { tier: tier + 1, groups, children: ids, target: 'b' + data.next };
+          snap('write', ids.join('、') + ' → 模型再写一份 T' + next.tier + ' 摘要', next);
+          data.active = data.active.filter(id => !ids.includes(id));
+          const parent = addBlock(tier + 1, groups, ids);
+          snap('promote', parent.id + '（T' + parent.tier + '）形成；四个子块转为仅存档', next);
+        }
+      }
+    }
+    const firstT1 = events.findIndex(e => e.kind === 'fold');
+    const firstT2 = events.findIndex(e => e.kind === 'promote' && e.action.tier === 2);
+    const firstT3 = events.findIndex(e => e.kind === 'promote' && e.action.tier === 3);
+    slider.max = events.length - 1;
+    let cursor = firstT2 - 3, selected = 'b3', pinned = false, focus = '';
+    let playing = false, timer = null, raf = null, retrieval = null, lastSignature = '';
+    let lastWidth = 0, layout = null, lastOptions = '';
+    let contextRaf = null, drawTarget = null;
+    const now = () => events[cursor];
+    const block = id => now().s.blocks.find(b => b.id === id);
+    const childrenOf = b => b.children.length ? b.children : b.groups.map(g => 'g' + g);
+    const countVisible = () => FIXED + now().s.raw.length * RAW + now().s.active.length * SUM + (retrieval?.added || 0);
+    const status = t => { el('status').textContent = t; };
+    function inputSnapshot() {
+      const s = now().s;
+      const inputs = [{ id: 'fixed', label: '固定部分', form: '指令、工具定义与受保护消息', tokens: FIXED, refs: '' }];
+      s.active.map(id => block(id)).sort((a, b) => a.groups[0] - b.groups[0]).forEach(b => {
+        const first = Math.min(...b.groups), last = Math.max(...b.groups);
+        inputs.push({ id: b.id, label: b.id + ' · T' + b.tier, form: '第 ' + first + (first === last ? '' : '–' + last) + ' 批的摘要', tokens: SUM, refs: b.refs });
+      });
+      s.raw.forEach(g => inputs.push({ id: 'g' + g, label: '第 ' + g + ' 批', form: '原文', tokens: RAW, refs: span([g]) }));
+      if (retrieval) {
+        const b = block(retrieval.blockId);
+        inputs.push({
+          id: 'retrieval', label: retrieval.read ? '回执 + 读取结果' : retrieval.destination === 'file' ? '解压回执' : '解压结果',
+          form: retrieval.read ? '文件路径与已读原文片段' : retrieval.destination === 'file' ? 'demo.txt 文件路径' : b.children.join('、') + ' 的摘要',
+          tokens: retrieval.added, refs: b.refs
+        });
+      }
+      return inputs;
+    }
+    function inputGeometry(items, width) {
+      let x = 3, y = 38;
+      const out = new Map();
+      for (const item of items) {
+        const size = item.id.startsWith('g') ? 116 : item.id === 'retrieval' ? 94 : 64;
+        if (x > 3 && x + size > width - 3) { x = 3; y += 58; }
+        out.set(item.id, { item, x, y, width: size, height: 46 });
+        x += size + 8;
+      }
+      return { items: out, height: y + 46 + 13 };
+    }
+    function asciiFrame(width, height, parent) {
+      const group = node('g', { class: 'bt-ascii-frame', 'aria-hidden': 'true' }, undefined, parent);
+      const top = text(0, 6, '', { class: 'bt-ascii-border', lengthAdjust: 'spacing' }, group);
+      const bottom = text(0, height, '', { class: 'bt-ascii-border', lengthAdjust: 'spacing' }, group);
+      const left = [18, 36].map(y => text(0, y, '|', { class: 'bt-ascii-border' }, group));
+      const right = [18, 36].map(y => text(width, y, '|', { class: 'bt-ascii-border', 'text-anchor': 'end' }, group));
+      const frame = { top, bottom, left, right };
+      resizeAscii(frame, width, height);
+      return frame;
+    }
+    function resizeAscii(frame, width, height) {
+      const line = '+' + '-'.repeat(Math.max(1, Math.round(width / 7.2) - 2)) + '+';
+      for (const node of [frame.top, frame.bottom]) { node.textContent = line; node.setAttribute('textLength', width); }
+      frame.bottom.setAttribute('y', height);
+      frame.left.forEach((node, i) => node.setAttribute('y', height * (i ? .78 : .39)));
+      frame.right.forEach((node, i) => { node.setAttribute('x', width); node.setAttribute('y', height * (i ? .78 : .39)); });
+    }
+    function drawInput(input, parent, ghost = false) {
+      const { item, x, y, width, height } = input;
+      const raw = item.id.startsWith('g'), summary = item.id.startsWith('b');
+      const tier = summary ? block(item.id)?.tier || 1 : 0;
+      const attrs = { transform: 'translate(' + x + ',' + y + ')', class: 'cursor-interaction', 'data-tooltip': item.label + ' · ' + item.form + ' · ' + fmt(item.tokens) + ' token' };
+      if (ghost) { attrs['data-ghost-input'] = item.id; attrs['aria-hidden'] = 'true'; }
+      else { attrs['data-input'] = item.id; attrs['data-tokens'] = item.tokens; attrs['data-source'] = item.refs; }
+      const group = node('g', attrs, undefined, parent);
+      const box = node('rect', { x: 0, y: 0, width, height, rx: 0, class: 'bt-input-box ' + (item.id === 'retrieval' ? 'bt-taken' : 'bt-t' + tier) + (item.id === selected ? ' bt-input-focus' : '') }, undefined, group);
+      const ascii = asciiFrame(width, height, group);
+      const title = raw ? '原文 ' + item.id.slice(1).padStart(2, '0') : summary ? item.id + ':T' + tier : item.id === 'fixed' ? '固定' : retrieval?.read ? '原文片段' : retrieval?.destination === 'file' ? '文件回执' : '取回摘要';
+      const label = text(width / 2, 18, title, { 'text-anchor': 'middle' }, group);
+      const sub = text(width / 2, 36, fmt(item.tokens), { 'text-anchor': 'middle', class: 'bt-muted' }, group);
+      return { ...input, group, box, label, sub, ascii };
+    }
+    function save() {
+      if (!stateStore?.setWidgetState) return;
+      const state = {
+        modelContent: { version: 2, view: 'summary-lineage-tree', step: cursor, event: now().text, selectedBlock: selected || null, focusedT2: focus, cumulativeNewTokens: now().s.groups.length * RAW, visibleTokens: countVisible(), visibleInputs: inputSnapshot(), retrieval: retrieval?.mode || null },
+        privateContent: { version: 2, cursor, selected, pinned, focus, retrieval }
+      };
+      lastSignature = JSON.stringify(state);
+      try { Promise.resolve(stateStore.setWidgetState(state)).catch(() => {}); } catch (_) {}
+    }
+    function node(tag, attrs = {}, text, parent = drawTarget || svg) {
+      const n = document.createElementNS(NS, tag);
+      for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, String(value));
+      if (text !== undefined) n.textContent = text;
+      parent.appendChild(n); return n;
+    }
+    function text(x, y, value, attrs = {}, parent = drawTarget || svg) { return node('text', { x, y, ...attrs }, value, parent); }
+    function fit(n, full, width) {
+      let end = full.length;
+      n.textContent = full;
+      while (end > 0 && n.getComputedTextLength() > width) { end--; n.textContent = full.slice(0, end) + '…'; }
+      if (end < full.length) n.setAttribute('data-tooltip', full);
+      return n;
+    }
+    function subtree(id, nodes = new Set()) {
+      if (nodes.has(id)) return nodes;
+      nodes.add(id);
+      const b = block(id);
+      if (b) childrenOf(b).forEach(child => subtree(child, nodes));
+      return nodes;
+    }
+    function parentChain(id) {
+      const out = new Set([id]);
+      let more = true;
+      while (more) {
+        more = false;
+        for (const b of now().s.blocks) if (!out.has(b.id) && b.children.some(c => out.has(c))) { out.add(b.id); more = true; }
+      }
+      return out;
+    }
+    function chooseFocus() {
+      const b = block(selected), parents = b ? parentChain(b.id) : new Set();
+      const t2s = now().s.blocks.filter(b => b.tier === 2);
+      const ancestor = t2s.find(b => parents.has(b.id));
+      if (ancestor) focus = ancestor.id;
+      if (!t2s.some(b => b.id === focus)) focus = t2s[0]?.id || '';
+    }
+    function updatePicker() {
+      const s = now().s;
+      if (!pinned || !block(selected)) selected = s.blocks[s.blocks.length - 1]?.id || '';
+      chooseFocus();
+      const key = s.blocks.length + '|' + s.active.join(',');
+      if (key !== lastOptions) {
+        picker.replaceChildren();
+        if (!s.blocks.length) picker.add(new Option('尚无摘要节点', ''));
+        [...s.blocks].reverse().forEach(b => picker.add(new Option(b.id + ' · T' + b.tier + ' · ' + (s.active.includes(b.id) ? '本轮可见' : '仅存档') + ' · 覆盖 ' + b.groups.length + ' 批原文', b.id)));
+        lastOptions = key;
+      }
+      picker.value = selected; picker.disabled = !s.blocks.length;
+    }
+    function paint() {
+      if (raf) cancelAnimationFrame(raf);
+      if (contextRaf) cancelAnimationFrame(contextRaf);
+      raf = null;
+      contextRaf = null;
+      drawTarget = svg;
+      const e = now(), s = e.s, b = block(selected);
+      const width = Math.max(280, root.getBoundingClientRect().width);
+      lastWidth = width;
+      const inputState = inputSnapshot();
+      const rack = inputGeometry(inputState, width);
+      const treeOffset = rack.height + 36;
+      const compact = width < 640 || (coarse.matches && width < 860);
+      const left = compact ? 55 : 49, right = width - 7, w = right - left;
+      const rows = { 3: 49, 2: 145, 1: 241, 0: 337 };
+      const draft = e.kind === 'write' && e.action?.target && !s.blocks.some(b => b.id === e.action.target) ? { id: e.action.target, tier: e.action.tier, groups: e.action.groups, children: e.action.children, pending: true } : null;
+      const blocks = draft ? [...s.blocks, draft] : s.blocks;
+      const nodes = new Map(), paths = [];
+      const fullSelected = b ? subtree(b.id) : new Set();
+      const ancestors = b ? parentChain(b.id) : new Set();
+      const picked = new Set([...fullSelected, ...ancestors]);
+      const retrieved = retrieval ? (retrieval.mode === 'full' ? subtree(retrieval.blockId) : new Set([retrieval.blockId, ...childrenOf(block(retrieval.blockId))])) : new Set();
+      let focused = blocks.find(b => b.id === focus);
+      const rawVisible = new Set();
+      const t2 = blocks.filter(b => b.tier === 2);
+      const t1 = blocks.filter(b => b.tier === 1);
+      const t3 = blocks.filter(b => b.tier === 3);
+      if (!focused && t2.length) focused = t2[0];
+      const selectedT2 = t2.find(parent => parent.id === selected || parent.children.includes(selected));
+      if (selectedT2) focused = selectedT2;
+      else if (!pinned && draft?.tier === 2) focused = draft;
+      const standalone = b?.tier === 1 && !t2.some(parent => parent.children.includes(b.id)) ? b : null;
+      const leafFocus = compact ? (!pinned && draft?.tier === 1 ? draft : standalone) : null;
+      if (leafFocus) focused = null;
+      const compressedGroups = focused ? focused.groups : [];
+      const lower = leafFocus ? [leafFocus, ...(b?.tier === 1 && b.id !== leafFocus.id ? [b] : [])].sort((a, b) => a.groups[0] - b.groups[0]) : compact && focused ? t1.filter(b => focused.children.includes(b.id)) : t1;
+      const plotGroups = leafFocus ? [...new Set(lower.flatMap(b => b.groups))].sort((a, b) => a - b) : compact && focused ? compressedGroups : s.groups;
+      const lowerCount = compact ? Math.max(4, lower.length, plotGroups.length) : 17;
+      const slot = w / lowerCount;
+      const xGroup = g => compact ? left + (Math.max(0, plotGroups.indexOf(g)) + .5) * slot : left + (g - .5) * slot;
+      const put = (b, x) => nodes.set(b.id, { ...b, x, y: rows[b.tier], width: b.tier >= 2 ? (compact ? 49 : 68) : Math.min(35, slot - 3), height: 34, active: s.active.includes(b.id) });
+      t3.forEach(b => put(b, compact ? left + w / 2 : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      t2.forEach((b, i) => put(b, compact ? left + (i + .5) * (w / 4) : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      lower.forEach((b, i) => put(b, compact ? left + (i + .5) * slot : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      plotGroups.forEach(g => {
+        rawVisible.add(g);
+        nodes.set('g' + g, { id: 'g' + g, groups: [g], tier: 0, x: xGroup(g), y: rows[0], width: Math.min(35, slot - 3), height: 28, active: s.raw.includes(g) });
+      });
+      const extraRaw = compact ? s.raw.filter(g => !rawVisible.has(g)) : [];
+      extraRaw.forEach((g, i) => nodes.set('g' + g, { id: 'g' + g, groups: [g], tier: 0, x: left + w - 29 - i * 62, y: 413, width: 49, height: 30, active: true }));
+      const height = treeOffset + (extraRaw.length ? 449 : 393);
+      svg.replaceChildren();
+      svg.dataset.transitioning = 'false';
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+      svg.setAttribute('width', width); svg.setAttribute('height', height);
+      svg.setAttribute('data-layout', compact && (focused || leafFocus) ? 'branch' : 'complete');
+      node('title', { id: 'bt-title' }, '摘要引用树 · ' + e.text);
+      node('desc', { id: 'bt-desc' }, (compact && (focused || leafFocus) ? '分支视图，展开 ' + (focused || leafFocus).id + ' 的来源。' : '完整来源树。') + '父节点向下指向来源。' + s.blocks.length + ' 个摘要节点，' + s.groups.length + ' 批原文。仅实线框节点进入本轮模型输入。');
+      const inputHeading = text(3, 16, '本轮模型实际收到的上下文', { 'data-bt': 'input-heading' });
+      const rackGroup = node('g', { 'data-input-rack': 'true', role: 'group', 'aria-label': '本轮输入' });
+      const inputNodes = new Map();
+      for (const input of rack.items.values()) inputNodes.set(input.item.id, drawInput(input, rackGroup));
+      text(3, treeOffset - 13, '存档树 / 父块 -> 来源', { class: 'bt-muted' });
+      const forest = node('g', { transform: 'translate(0,' + treeOffset + ')', 'data-forest': 'true' });
+      drawTarget = forest;
+      const defs = node('defs');
+      const marker = node('marker', { id: 'bt-arrow', viewBox: '0 0 7 7', refX: 6, refY: 3.5, markerWidth: 5, markerHeight: 5, orient: 'auto' }, undefined, defs);
+      node('path', { d: 'M1,1 L6,3.5 L1,6', fill: 'none', stroke: 'var(--muted-foreground)', 'stroke-width': 1 }, undefined, marker);
+      [3, 2, 1, 0].forEach(t => {
+        text(2, rows[t] + 4, t ? 'T' + t : '原文', { class: 'bt-muted' });
+        if (![...nodes.values()].some(n => n.tier === t)) text(left + w / 2, rows[t] + 4, t ? '尚未形成' : '尚未写入', { class: 'bt-muted', 'text-anchor': 'middle' });
+      });
+      const edgeGroup = node('g', { 'aria-hidden': 'true' });
+      for (const n of nodes.values()) {
+        if (!n.tier) continue;
+        for (const source of childrenOf(n)) {
+          const child = nodes.get(source);
+          if (!child) continue;
+          const y1 = n.y + n.height / 2 + 1, y2 = child.y - child.height / 2 - 3;
+          const middle = (y1 + y2) / 2;
+          const isRetrieved = retrieved.has(n.id) && retrieved.has(child.id);
+          const emphasized = picked.has(n.id) && picked.has(child.id);
+          const path = node('path', { d: 'M' + n.x + ',' + y1 + ' V' + middle + ' H' + child.x + ' V' + y2, class: 'bt-edge' + (isRetrieved ? ' bt-edge-retrieve' : emphasized ? ' bt-edge-focus' : ''), 'data-parent': n.id, 'data-child': child.id }, undefined, edgeGroup);
+          text(child.x, y2 + 4, 'v', { 'text-anchor': 'middle', class: isRetrieved ? 'bt-node-label-taken' : 'bt-muted' }, edgeGroup);
+          if (Math.abs(n.x - child.x) > 5) text(child.x, middle + 4, '+', { 'text-anchor': 'middle', class: 'bt-muted' }, edgeGroup);
+          paths.push({ parent: n.id, child: child.id, path, tier: n.tier });
+        }
+      }
+      const shapes = new Map();
+      for (const n of nodes.values()) {
+        const isRaw = !n.tier;
+        const sourceText = isRaw ? '第 ' + n.groups[0] + ' 批原文 · ' + span(n.groups) : n.id + ' · T' + n.tier + ' · ' + n.groups.length + ' 批来源 · ' + (n.pending ? '模型正在生成' : n.active ? '本轮可见' : '仅存档');
+        const group = node('g', { 'data-node': n.id, 'data-tier': n.tier, 'data-active': n.active, 'data-pending': Boolean(n.pending), 'data-tooltip': sourceText, class: isRaw || n.pending ? '' : 'cursor-interaction', 'aria-hidden': 'true' });
+        const className = 'bt-node bt-t' + n.tier + (n.active ? ' bt-active' : ' bt-archive') + (n.id === selected ? ' bt-selected' : '') + (n.pending ? ' bt-pending' : '') + (retrieved.has(n.id) ? ' bt-taken' : '');
+        node('rect', { x: n.x - n.width / 2, y: n.y - n.height / 2, width: n.width, height: n.height, rx: 0, class: className, opacity: 0 }, undefined, group);
+        node('rect', { x: n.x - Math.min(slot - 1, Math.max(n.width, coarse.matches ? 44 : 32)) / 2, y: n.y - 22, width: Math.min(slot - 1, Math.max(n.width, coarse.matches ? 44 : 32)), height: 44, fill: 'transparent' }, undefined, group);
+        const nodeId = isRaw ? String(n.groups[0]).padStart(2, '0') : n.id;
+        const value = n.pending ? '{' + nodeId + '}' : n.active ? '[' + nodeId + ']' : '(' + nodeId + ')';
+        text(n.x, n.y + 4, value, { 'text-anchor': 'middle', class: retrieved.has(n.id) ? 'bt-node-label-taken' : '' }, group);
+        if (n.id === selected) text(n.x, n.y - 23, '*', { 'text-anchor': 'middle' }, group);
+        if (n.pending) text(n.x, n.y - 24, '生成中', { 'text-anchor': 'middle', class: 'bt-muted' });
+        if (compact && n.tier === 2 && n.id !== focused?.id) text(n.x, n.y + 35, '+' + n.children.length + ' T1', { 'text-anchor': 'middle', class: 'bt-muted' });
+        shapes.set(n.id, group);
+      }
+      if (extraRaw.length) {
+        text(2, 417, '近期', { class: 'bt-muted' });
+        fit(text(left, 417, '原文仍可见 · 50K / 批', { class: 'bt-muted' }), '原文仍可见 · 50K / 批', w - extraRaw.length * 62 - 15);
+      } else if (s.raw.length) {
+        const latest = nodes.get('g' + s.raw[s.raw.length - 1]);
+        if (latest) text(latest.x, latest.y + 33, '近期', { class: 'bt-muted', 'text-anchor': 'middle' });
+      }
+      layout = { nodes, paths, shapes, inputs: inputNodes, inputHeading, rackGroup, forest, treeOffset, height, width, cursor, tokens: countVisible() };
+      const selectedBlock = block(selected);
+      el('history').textContent = fmt(s.groups.length * RAW);
+      el('visible').textContent = fmt(countVisible());
+      el('input-a11y').textContent = inputState.map(item => item.label + '，' + item.form + '，' + fmt(item.tokens) + ' token').join('；');
+      el('counter').textContent = cursor + ' / ' + (events.length - 1);
+      slider.value = cursor;
+      slider.setAttribute('aria-valuetext', e.text);
+      el('event').textContent = retrieval ? retrieval.read ? 'read：从文件取回精确片段' : '解压预览 · ' + retrieval.blockId : e.text;
+      el('scope').textContent = compact && (focused || leafFocus) ? '分支视图：展开 ' + (focused || leafFocus).id : '完整来源树';
+      el('next').disabled = cursor >= events.length - 1;
+      ['one', 'full', 'file'].forEach(key => { el(key).disabled = !selectedBlock; });
+      el('read').hidden = !retrieval || retrieval.destination !== 'file' || retrieval.read;
+      if (!selectedBlock) el('detail').textContent = '原文编号位于最底层；生成摘要后出现上方父节点。';
+      else if (retrieval) {
+        const src = block(retrieval.blockId);
+        if (retrieval.read) el('detail').textContent = span([src.groups[0]]) + '：TTL=3600s；401 后刷新重试。精确片段由存档返回。';
+        else if (retrieval.destination === 'file') el('detail').textContent = (retrieval.automatic ? '大文本自动落盘：' : 'toFile：') + fmt(retrieval.bodyTokens) + ' token → demo.txt（模拟）；窗口增加路径回执。';
+        else el('detail').textContent = '解压一层：' + src.id + ' → ' + src.children.join('、') + '；来源摘要以工具结果返回。';
+      } else {
+        const sources = selectedBlock.children.length ? selectedBlock.children.join('、') : span(selectedBlock.groups);
+        el('detail').textContent = selectedBlock.id + '（T' + selectedBlock.tier + '）→ ' + sources + ' · 覆盖 ' + fmt(selectedBlock.groups.length * RAW) + ' token 原文。';
+      }
+    }
+    function animate(direction, mode = 'one') {
+      if (reduced.matches || !layout) return;
+      const { paths, shapes } = layout;
+      let chosen = [], rootId;
+      if (direction === 'up') {
+        rootId = now().action?.target;
+        chosen = paths.filter(p => p.parent === rootId);
+      } else {
+        rootId = selected;
+        const all = subtree(rootId);
+        chosen = mode === 'full' ? paths.filter(p => all.has(p.parent) && all.has(p.child)) : paths.filter(p => p.parent === rootId);
+      }
+      if (!chosen.length) return;
+      const rootTier = block(rootId)?.tier || now().action?.tier || 1;
+      const duration = direction === 'down' && mode === 'full' ? rootTier * 520 + 250 : 720;
+      const pulses = chosen.map(p => ({ ...p, length: p.path.getTotalLength(), delay: direction === 'down' && mode === 'full' ? (rootTier - p.tier) * 520 : 0, dot: node('text', { x: 0, y: 0, 'text-anchor': 'middle', class: direction === 'down' ? 'bt-node-label-taken' : '', 'aria-hidden': 'true', 'data-pulse': 'true', visibility: 'hidden' }, '*') }));
+      const born = direction === 'up' ? shapes.get(rootId) : null;
+      const started = performance.now();
+      function frame(t) {
+        const elapsed = t - started;
+        for (const p of pulses) {
+          const f = (elapsed - p.delay) / (direction === 'down' && mode === 'full' ? 650 : 720);
+          p.dot.setAttribute('visibility', f >= 0 && f < 1 ? 'visible' : 'hidden');
+          if (f >= 0 && f <= 1) {
+            const fraction = direction === 'up' ? 1 - f : f;
+            const point = p.path.getPointAtLength(p.length * fraction);
+            p.dot.setAttribute('x', point.x); p.dot.setAttribute('y', point.y + 4);
+          }
+        }
+        if (born) born.setAttribute('transform', 'translate(0,' + (18 * Math.max(0, 1 - elapsed / 720)) + ')');
+        if (elapsed < duration && root.isConnected) raf = requestAnimationFrame(frame);
+        else { pulses.forEach(p => p.dot.remove()); if (born) born.removeAttribute('transform'); raf = null; }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function animateContext(before) {
+      if (reduced.matches || !before || !layout || Math.abs(before.width - layout.width) > 1) return;
+      const after = layout;
+      const event = now();
+      const replacingReceipt = before.inputs.has('retrieval') && after.inputs.has('retrieval') && before.inputs.get('retrieval').item.tokens !== after.inputs.get('retrieval').item.tokens;
+      const fresh = [...after.inputs.values()].filter(n => !before.inputs.has(n.item.id) || (n.item.id === 'retrieval' && replacingReceipt));
+      const leaving = [...before.inputs.values()].filter(n => !after.inputs.has(n.item.id) || (n.item.id === 'retrieval' && replacingReceipt));
+      const common = [...after.inputs.values()].filter(n => before.inputs.has(n.item.id) && !(n.item.id === 'retrieval' && replacingReceipt));
+      const changed = fresh.length || leaving.length || common.some(n => { const old = before.inputs.get(n.item.id); return old.x !== n.x || old.y !== n.y; });
+      const pending = !changed && ['write', 'nudge'].includes(event.kind);
+      if (!changed && !pending) return;
+      const sourceIds = retrieval ? [] : event.action?.children?.length ? event.action.children : (event.action?.groups || []).map(g => 'g' + g);
+      const sources = sourceIds.map(id => before.inputs.get(id)).filter(Boolean);
+      const overlay = node('g', { 'data-context-motion': 'true', 'aria-hidden': 'true' }, undefined, svg);
+      const ghosts = leaving.map(old => ({ old, visual: drawInput(old, overlay, true) }));
+      const arrivals = fresh.map(target => {
+        let origin;
+        if (!retrieval && target.item.id === event.action?.target && sources.length) {
+          const x1 = Math.min(...sources.map(s => s.x));
+          const x2 = Math.max(...sources.map(s => s.x + s.width));
+          const width = Math.min(after.width - 6, Math.max(target.width, x2 - x1));
+          origin = { x: Math.min(x1, after.width - width - 3), y: sources.reduce((v, s) => v + s.y, 0) / sources.length, width, height: 46 };
+        } else {
+          const id = retrieval ? selected : target.item.id;
+          let source = after.nodes.get(id) || before.nodes.get(id);
+          if (retrieval) {
+            const b = block(selected);
+            const ids = retrieval.mode === 'full' || retrieval.read ? b.groups.map(g => 'g' + g) : childrenOf(b);
+            const origins = ids.map(id => after.nodes.get(id)).filter(Boolean);
+            if (origins.length) source = { x: origins.reduce((v, s) => v + s.x, 0) / origins.length, y: origins.reduce((v, s) => v + s.y, 0) / origins.length, width: origins[0].width, height: origins[0].height };
+          }
+          origin = source ? { x: source.x - source.width / 2, y: after.treeOffset + source.y - source.height / 2, width: source.width, height: source.height } : { x: target.x, y: target.y + 50, width: target.width, height: target.height };
+        }
+        return { target, origin };
+      });
+      const primary = fresh.find(n => n.item.id === event.action?.target) || fresh[0];
+      const flyDelay = retrieval ? (retrieval.mode === 'full' || retrieval.read ? 950 : 650) : 0;
+      const duration = retrieval ? flyDelay + 950 : ['fold', 'promote'].includes(event.kind) ? 1450 : pending ? 820 : 950;
+      const maxHeight = Math.max(before.height, after.height);
+      svg.setAttribute('viewBox', '0 0 ' + after.width + ' ' + maxHeight);
+      svg.setAttribute('height', maxHeight);
+      svg.dataset.transitioning = 'true';
+      svg.dataset.transitionKind = retrieval ? 'retrieve' : event.kind;
+      after.inputHeading.textContent = pending ? '模型写摘要 · 本轮输入保持不变' : retrieval ? '取回内容正在进入下一轮输入' : event.kind === 'promote' ? '多份摘要正在汇成一个输入块' : event.kind === 'fold' ? '原文正在收缩为摘要输入块' : '新内容正在进入模型输入';
+      const ease = t => t * t * (3 - 2 * t);
+      const mix = (a, b, p) => a + (b - a) * p;
+      function place(v, x, y, width, height) {
+        v.group.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+        v.box.setAttribute('width', width); v.box.setAttribute('height', height);
+        v.label.setAttribute('x', width / 2); v.sub.setAttribute('x', width / 2);
+        v.label.setAttribute('y', height * .39); v.sub.setAttribute('y', height * .78);
+        if (v.ascii) resizeAscii(v.ascii, width, height);
+      }
+      function update(progress) {
+        const p = ease(progress);
+        common.forEach(v => {
+          const old = before.inputs.get(v.item.id);
+          const bounce = pending && sourceIds.includes(v.item.id) ? -4 * Math.sin(progress * Math.PI) : 0;
+          place(v, mix(old.x, v.x, p), mix(old.y, v.y, p) + bounce, mix(old.width, v.width, p), mix(old.height, v.height, p));
+          if (pending && sourceIds.includes(v.item.id)) v.box.setAttribute('stroke', 'var(--foreground)');
+        });
+        for (const { old, visual } of ghosts) {
+          const archived = after.nodes.get(old.item.id);
+          const destination = primary ? { x: primary.x, y: primary.y, width: primary.width, height: primary.height } : archived ? { x: archived.x - archived.width / 2, y: after.treeOffset + archived.y - archived.height / 2, width: archived.width, height: archived.height } : { ...old, y: old.y + 55 };
+          place(visual, mix(old.x, destination.x, p), mix(old.y, destination.y, p), mix(old.width, destination.width, p), mix(old.height, destination.height, p));
+          visual.group.setAttribute('opacity', Math.max(0, 1 - Math.max(0, progress - .48) / .38));
+        }
+        for (const { target, origin } of arrivals) {
+          const local = retrieval ? Math.max(0, Math.min(1, (progress * duration - flyDelay) / 950)) : progress;
+          const q = ease(local);
+          place(target, mix(origin.x, target.x, q), mix(origin.y, target.y, q), mix(origin.width, target.width, q), mix(origin.height, target.height, q));
+          const merging = !retrieval && target.item.id === event.action?.target && sources.length;
+          target.group.setAttribute('opacity', merging ? Math.max(0, Math.min(1, (progress - .42) / .38)) : local > 0 ? 1 : 0);
+        }
+        after.forest.setAttribute('transform', 'translate(0,' + mix(before.treeOffset, after.treeOffset, p) + ')');
+        el('visible').textContent = fmt(Math.round(mix(before.tokens, after.tokens, p) / 100) * 100);
+      }
+      const started = performance.now();
+      update(0);
+      function frame(t) {
+        if (!root.isConnected || layout !== after) return;
+        const progress = Math.min(1, (t - started) / duration);
+        update(progress);
+        if (progress < 1) contextRaf = requestAnimationFrame(frame);
+        else {
+          overlay.remove();
+          [...after.inputs.values()].forEach(v => { place(v, v.x, v.y, v.width, v.height); v.group.setAttribute('opacity', '1'); });
+          after.forest.setAttribute('transform', 'translate(0,' + after.treeOffset + ')');
+          after.inputHeading.textContent = '本轮模型实际收到的上下文';
+          el('visible').textContent = fmt(after.tokens);
+          svg.setAttribute('viewBox', '0 0 ' + after.width + ' ' + after.height); svg.setAttribute('height', after.height);
+          svg.dataset.transitioning = 'false'; contextRaf = null;
+        }
+      }
+      contextRaf = requestAnimationFrame(frame);
+    }
+    function render(motion = false) {
+      const before = layout;
+      updatePicker(); paint();
+      if (motion) { animate(retrieval ? 'down' : 'up', retrieval?.mode === 'full' ? 'full' : 'one'); animateContext(before); }
+    }
+    function stop() {
+      playing = false; clearTimeout(timer); timer = null;
+      el('play').setAttribute('aria-pressed', 'false');
+      el('play').textContent = cursor === events.length - 1 ? '从头播放' : '播放动画';
+    }
+    function go(n, motion = true, persist = true) {
+      cursor = Math.max(0, Math.min(events.length - 1, Math.round(n)));
+      retrieval = null;
+      render(motion);
+      if (!playing) stop();
+      if (persist) save();
+    }
+    function tick() {
+      if (!playing) return;
+      if (!root.isConnected || cursor >= events.length - 1) { stop(); save(); return; }
+      go(cursor + 1, true, false);
+      if (cursor >= events.length - 1) { stop(); save(); status('T3 树已形成，来源子块与原文仍保留。'); return; }
+      timer = setTimeout(tick, reduced.matches ? 1150 : ['fold', 'promote'].includes(now().kind) ? 1750 : 1050);
+    }
+    function choose(id) {
+      if (!block(id)) return;
+      stop(); selected = id; pinned = true; retrieval = null; render(); save();
+    }
+    function restore(mode) {
+      const b = block(selected);
+      if (!b) return;
+      stop();
+      const bodyTokens = mode === 'full' || b.tier === 1 ? b.groups.length * RAW : b.children.length * SUM;
+      const automatic = mode !== 'file' && bodyTokens * 2 > 10000;
+      const destination = automatic || mode === 'file' ? 'file' : 'inline';
+      retrieval = { blockId: b.id, mode, bodyTokens, destination, automatic, read: false, added: destination === 'file' ? 100 : bodyTokens };
+      render(true); status(el('detail').textContent); save();
+    }
+    function saved(state) {
+      const p = state?.privateContent;
+      if (p?.version !== 2 || !Number.isInteger(p.cursor)) return false;
+      stop(); cursor = Math.max(0, Math.min(events.length - 1, p.cursor));
+      selected = typeof p.selected === 'string' ? p.selected : ''; pinned = Boolean(p.pinned);
+      focus = typeof p.focus === 'string' ? p.focus : ''; retrieval = null;
+      if (p.retrieval && block(p.retrieval.blockId) && ['one', 'full', 'file'].includes(p.retrieval.mode)) {
+        const b = block(p.retrieval.blockId), mode = p.retrieval.mode;
+        const bodyTokens = mode === 'full' || b.tier === 1 ? b.groups.length * RAW : b.children.length * SUM;
+        const automatic = mode !== 'file' && bodyTokens * 2 > 10000;
+        const destination = automatic || mode === 'file' ? 'file' : 'inline';
+        const read = destination === 'file' && p.retrieval.read === true;
+        retrieval = { blockId: b.id, mode, bodyTokens, automatic, destination, read, added: read ? 300 : destination === 'file' ? 100 : bodyTokens };
+        selected = b.id; pinned = true;
+      }
+      return true;
+    }
+    slider.addEventListener('input', () => { stop(); go(Number(slider.value)); });
+    el('next').addEventListener('click', () => { stop(); go(cursor + 1); });
+    el('play').addEventListener('click', () => {
+      if (playing) { stop(); save(); return; }
+      if (cursor >= events.length - 1) go(0, false, false);
+      retrieval = null; pinned = false; playing = true;
+      el('play').textContent = '暂停'; el('play').setAttribute('aria-pressed', 'true');
+      render(); save(); tick();
+    });
+    [['jump-t1', firstT1], ['jump-t2', firstT2], ['jump-t3', firstT3]].forEach(([key, value]) => el(key).addEventListener('click', () => { stop(); pinned = false; go(value - 1, false, false); go(value); }));
+    picker.addEventListener('change', () => choose(picker.value));
+    svg.addEventListener('click', event => { const n = event.target.closest('[data-node], [data-input]'); if (n) choose(n.getAttribute('data-node') || n.getAttribute('data-input')); });
+    ['one', 'full', 'file'].forEach(mode => el(mode).addEventListener('click', () => restore(mode)));
+    el('read').addEventListener('click', () => {
+      if (!retrieval || retrieval.destination !== 'file') return;
+      retrieval.read = true; retrieval.added = 300;
+      render(true); save();
+    });
+    window.addEventListener('explainer:set_globals', event => {
+      const next = event.detail?.globals?.widgetState;
+      if (next && JSON.stringify(next) !== lastSignature && saved(next)) render();
+    });
+    new ResizeObserver(() => { const w = Math.max(280, root.getBoundingClientRect().width); if (Math.abs(w - lastWidth) > 1) paint(); }).observe(root);
+    document.addEventListener('visibilitychange', () => { if (document.hidden && playing) { stop(); save(); } });
+    coarse.addEventListener('change', () => paint());
+    if (stateStore?.widgetState) saved(stateStore.widgetState);
+    render();
+  })();
+  </script>
+</div>
