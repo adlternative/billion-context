@@ -24,6 +24,11 @@ All asset references are **relative** so the pages work under any mount path
 | `styles.css`    | design system, light/dark via `prefers-color-scheme`             |
 | `main.js`       | EN/中文 toggle (persisted in localStorage), copy buttons, scroll reveal |
 | `docs/index.html` | bilingual /docs/ page                                           |
+| `interactive/context-explainer.html` | standalone English ASCII compression/delegation animations |
+| `interactive/context-explainer.zh-CN.html` | standalone Chinese version of the same animations |
+
+The interactive pages also open directly from disk without a server. Their checked-in
+HTML contains all required assets; see [editing and regeneration](interactive/README.md).
 
 ## TODO before launch
 

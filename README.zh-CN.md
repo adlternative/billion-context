@@ -90,6 +90,12 @@ QQ群:
    真实模型 API (Anthropic / OpenAI / 兼容厂商)
 ```
 
+### 交互原理演示
+
+[![ASCII 摘要树：本轮模型输入与可恢复来源](docs/images/context-explainer-zh-CN.png)](website/interactive/context-explainer.zh-CN.html)
+
+下载 [中文版 HTML](website/interactive/context-explainer.zh-CN.html) 或 [English HTML](website/interactive/context-explainer.html)，用浏览器打开，即可播放压缩、解压与 Pi 子代理派发动画。页面可离线运行；GitHub 会展示 HTML 源码，不会在 README 内执行动画。token 大小与每四块晋升都是教学示例，不代表生产阈值或性能测试结果。
+
 ### 上下文管理工具
 
 代理向对话注入四个上下文管理工具;模型在上下文增长时自行调用,代理在服务端执行 `compress`,折叠后的范围在历史中保持摘要形态、直到被恢复:

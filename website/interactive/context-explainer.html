@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Explore model-visible context, layered summaries, on-demand restoration, and independent Pi delegate sessions.">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>billion-context: interactive ASCII walkthrough</title>
+<style>:root {
+  color-scheme: light dark;
+  --font-size-base: 14px;
+  --background: light-dark(#ffffff, #191919);
+  --foreground: light-dark(#202124, #eeeeee);
+  --muted-foreground: light-dark(#66686c, #b2b4b8);
+  --border: light-dark(#d9dadd, #4b4d50);
+  --muted: light-dark(#f0f1f2, #2a2b2e);
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --viz-series-1: light-dark(#1976d2, #90caf9);
+  --viz-series-2: light-dark(#975800, #ffcc80);
+  --viz-series-3: light-dark(#267344, #a5d6a7);
+  --viz-series-4: light-dark(#a52a69, #f48fb1);
+}
+* { box-sizing: border-box; }
+html { background: var(--background); color: var(--foreground); scroll-behavior: smooth; }
+body { max-width: 816px; margin: 0 auto; padding: 24px; font: 400 var(--font-size-base)/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 1.55rem; font-weight: 500; }
+h2 { font-size: 1.2rem; font-weight: 500; }
+h3 { font-size: 1rem; font-weight: 500; }
+a { color: inherit; text-underline-offset: 3px; }
+.page-header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+.brand { font-weight: 500; text-decoration: none; }
+nav { display: flex; flex-wrap: wrap; gap: 16px; }
+.introduction { margin-top: 12px; }
+.notice, .distinction { color: var(--muted-foreground); margin-top: 16px; }
+main > section { margin-top: 32px; scroll-margin-top: 16px; }
+.distinction { padding-bottom: 12px; }
+footer { border-top: 1px solid var(--border); margin-top: 32px; padding-top: 16px; color: var(--muted-foreground); font-size: 12px; }
+footer p + p { margin-top: 8px; }
+.text-small { font-size: 12px; }
+.text-muted { color: var(--muted-foreground); }
+.tabular-nums { font-variant-numeric: tabular-nums; }
+.viz-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.btn { appearance: none; border: 1px solid var(--border); border-radius: 0; background: var(--background); color: var(--foreground); padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.btn-primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn:enabled:hover { text-decoration: underline; }
+.form-label { display: block; font-weight: 400; }
+.form-range { display: block; width: 100%; margin: 4px 0; accent-color: var(--foreground); }
+.form-select { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 0; color: var(--foreground); background: var(--background); font: inherit; }
+.cursor-interaction { cursor: pointer; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 480px) { body { padding: 16px; } nav { gap: 12px; } }
+@media (pointer: coarse) { .btn { min-height: 44px; } .form-select { min-height: 44px; font-size: 16px; } .form-range { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<header class="page-header">
+  <a class="brand" href="../index.html">billion-context</a>
+  <nav aria-label="Page navigation">
+    <a href="#compression">Compression and restoration</a><a href="#delegate">Pi delegation</a>
+    <a href="context-explainer.zh-CN.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+  </nav>
+</header>
+<main>
+  <h1>billion-context: interactive ASCII walkthrough</h1>
+  <p class="introduction">Watch the input blocks shrink and merge while their source messages remain addressable. Then compare this with delegation into a separate Pi process.</p>
+  <p class="notice">Teaching simulation, not a live session or a performance benchmark. 50K → 1K and four-block promotion are illustrative; real ranges, timing, and summary sizes are chosen by the model. Fixed input and receipt sizes are simplified.</p>
+  <noscript>Enable JavaScript to play the local, client-side simulations.</noscript>
+  <script>
+window.createExplainerState = function (name) {
+  const key = 'billion-context:interactive:v1:' + name;
+  let state = null;
+  try { state = JSON.parse(localStorage.getItem(key)); } catch (_) {}
+  const store = {
+    widgetState: state,
+    setWidgetState(next) {
+      store.widgetState = next;
+      try { localStorage.setItem(key, JSON.stringify(next)); } catch (_) {}
+      return Promise.resolve();
+    }
+  };
+  return store;
+};
+document.addEventListener('pointerover', function (event) {
+  const target = event.target.closest('[data-tooltip]');
+  if (!target) return;
+  const value = target.getAttribute('data-tooltip');
+  target.setAttribute('aria-label', value);
+  if (target.namespaceURI === 'http://www.w3.org/2000/svg') {
+    if (!target.querySelector(':scope > title')) {
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = value;
+      target.appendChild(title);
+    }
+  } else target.setAttribute('title', value);
+});</script>
+  <section id="compression" aria-label="Compression and restoration"><div id="bc-tree-explorer">
+  <style>
+    #bc-tree-explorer { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * 1); color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #bc-tree-explorer .bt-heading { padding-right: 90px; }
+    #bc-tree-explorer .bt-controls, #bc-tree-explorer .bt-fields { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .5); }
+    #bc-tree-explorer .bt-between { display: flex; flex-wrap: wrap; justify-content: space-between; gap: calc(var(--font-size-base) * .5); }
+    #bc-tree-explorer .bt-legend { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--font-size-base) * .5) calc(var(--font-size-base) * 1); }
+    #bc-tree-explorer .bt-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+    #bc-tree-explorer .bt-dot { display: inline-block; width: 10px; height: 10px; border: 1px solid var(--foreground); background: var(--muted); }
+    #bc-tree-explorer .bt-stored { border-style: dashed; background: transparent; }
+    #bc-tree-explorer .bt-color { background: var(--viz-series-4); border: none; }
+    #bc-tree-explorer .bt-detail { min-height: calc(var(--font-size-base) * 1.5); overflow-wrap: anywhere; }
+    #bc-tree-explorer .bt-tree { display: block; width: 100%; }
+    #bc-tree-explorer .bt-tree text { fill: var(--foreground); font-size: 12px; }
+    #bc-tree-explorer .bt-tree .bt-muted { fill: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-edge { fill: none; stroke: var(--border); stroke-width: 1.25; }
+    #bc-tree-explorer .bt-tree .bt-edge-focus { stroke: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-edge-retrieve { stroke: var(--viz-series-4); stroke-width: 1.5; }
+    #bc-tree-explorer .bt-tree .bt-node { stroke: none; fill: transparent; }
+    #bc-tree-explorer .bt-tree .bt-archive { stroke-dasharray: 3 3; }
+    #bc-tree-explorer .bt-tree .bt-active { stroke: var(--foreground); }
+    #bc-tree-explorer .bt-tree .bt-selected { stroke: var(--foreground); stroke-width: 2; }
+    #bc-tree-explorer .bt-tree .bt-pending { stroke: var(--muted-foreground); stroke-dasharray: 2 3; }
+    #bc-tree-explorer .bt-tree .bt-t0, #bc-tree-explorer .bt-tree .bt-t1, #bc-tree-explorer .bt-tree .bt-t2, #bc-tree-explorer .bt-tree .bt-t3, #bc-tree-explorer .bt-tree .bt-taken { fill: transparent; }
+    #bc-tree-explorer .bt-tree .bt-input-box { stroke: none; fill: var(--background); }
+    #bc-tree-explorer .bt-tree .bt-ascii-border { fill: var(--muted-foreground); }
+    #bc-tree-explorer .bt-tree .bt-input-focus + .bt-ascii-frame text { fill: var(--foreground); }
+    #bc-tree-explorer .bt-tree .bt-node-label-taken { fill: var(--viz-series-4); }
+    #bc-tree-explorer [hidden] { display: none !important; }
+    @media (prefers-reduced-motion: reduce) { #bc-tree-explorer * { animation: none !important; transition: none !important; } }
+  </style>
+
+  <div class="bt-heading">
+    <h2>What enters the model context</h2>
+    <div class="text-small text-muted">ASCII / model input above / source tree below</div>
+  </div>
+
+  <div class="bt-controls">
+    <div class="viz-controls">
+      <button type="button" class="btn btn-primary" data-bt="play" aria-pressed="false">Play animation</button>
+      <button type="button" class="btn" data-bt="next">Next</button>
+      <button type="button" class="btn" data-bt="jump-t1">First T1</button>
+      <button type="button" class="btn" data-bt="jump-t2">First T2</button>
+      <button type="button" class="btn" data-bt="jump-t3">First T3</button>
+    </div>
+    <div class="bt-between text-small"><label class="form-label" for="bt-progress">Progress</label><span class="tabular-nums" data-bt="counter">16 / 75</span></div>
+    <input class="form-range" type="range" id="bt-progress" min="0" max="75" step="1" value="16" aria-label="Tree growth progress">
+    <div data-bt="event" class="text-small" aria-live="polite">Original batch 4 is about to become summary b4</div>
+    <div class="bt-between text-small tabular-nums"><span>New original tokens <span data-bt="history">250K</span> token</span><span>In model input <span data-bt="visible">105K</span> token</span></div>
+  </div>
+
+  <svg class="bt-tree" data-bt="tree" role="img" aria-labelledby="bt-title bt-desc">
+    <title id="bt-title">Source tree from T3 through T2 and T1 to original messages</title>
+    <desc id="bt-desc">Each edge points from a summary to its sources. Select a node to trace its sources and preview restoration.</desc>
+  </svg>
+
+  <div class="bt-legend text-small">
+    <span>[id] In model input</span>
+    <span>(id) Stored only</span>
+    <span>* Selected / moving</span>
+    <span data-bt="scope" class="text-muted">Full source tree</span>
+  </div>
+
+  <div class="bt-fields">
+    <label class="form-label" for="bt-select">Select a node to trace its sources</label>
+    <select class="form-select" id="bt-select" aria-label="Choose a summary-tree node"></select>
+    <div class="bt-detail text-small" data-bt="detail" aria-live="polite"></div>
+    <div class="viz-controls">
+      <button type="button" class="btn" data-bt="one">Restore one tier</button>
+      <button type="button" class="btn" data-bt="full">full: originals</button>
+      <button type="button" class="btn" data-bt="file">toFile: export</button>
+      <button type="button" class="btn" data-bt="read" hidden>read: excerpt</button>
+    </div>
+  </div>
+  <div class="text-small text-muted">Teaching scale: 50K original tokens -> 1K T1 summary; four summaries -> one 1K parent.</div>
+  <div class="sr-only" data-bt="status" role="status" aria-live="polite"></div>
+  <div class="sr-only" data-bt="input-a11y"></div>
+
+  <script>
+  (() => {
+    const stateStore = window.createExplainerState('compression');
+    const root = document.getElementById('bc-tree-explorer');
+    const el = key => root.querySelector('[data-bt="' + key + '"]');
+    const svg = el('tree'), slider = root.querySelector('#bt-progress'), picker = root.querySelector('#bt-select');
+    const NS = 'http://www.w3.org/2000/svg';
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const coarse = window.matchMedia('(pointer: coarse)');
+    const RAW = 50000, SUM = 1000, FIXED = 2000;
+    const copy = x => JSON.parse(JSON.stringify(x));
+    const fmt = n => n >= 1000 ? (n / 1000).toFixed(n % 1000 ? 1 : 0) + 'K' : String(n);
+    const ref = n => 'm' + String(n).padStart(5, '0');
+    const span = gs => ref(2 + (Math.min(...gs) - 1) * 5) + '–' + ref(6 + (Math.max(...gs) - 1) * 5);
+    const data = { groups: [], raw: [], active: [], blocks: [], next: 1 };
+    const events = [];
+    const snap = (kind, text, action = null) => events.push({ kind, text, action: copy(action), s: copy(data) });
+    const addBlock = (tier, groups, children) => {
+      const b = { id: 'b' + data.next++, tier, groups: [...groups], children: [...children], refs: span(groups) };
+      data.blocks.push(b); data.active.push(b.id); return b;
+    };
+    snap('start', 'Start: original batches arrive before summaries exist');
+    for (let g = 1; g <= 17; g++) {
+      data.groups.push(g); data.raw.push(g);
+      snap('append', 'Added batch ' + g + ' / +50K original tokens', { group: g });
+      if (data.raw.length > 1) {
+        const g0 = data.raw[0];
+        const a = { tier: 1, groups: [g0], children: [], target: 'b' + data.next };
+        snap('nudge', 'Candidate batch ' + g0 + ': the kernel suggests a range; the model decides', a);
+        snap('write', 'Writing summary for batch ' + g0 + ' -> ' + a.target + ' (T1)', a);
+        data.raw.shift(); addBlock(1, [g0], []);
+        snap('fold', a.target + ' (T1) created; originals stay below', a);
+        for (let tier = 1; tier < 3; tier++) {
+          const sources = data.active.map(id => data.blocks.find(b => b.id === id)).filter(b => b.tier === tier).slice(0, 4);
+          if (sources.length < 4) continue;
+          const ids = sources.map(b => b.id), groups = sources.flatMap(b => b.groups);
+          const next = { tier: tier + 1, groups, children: ids, target: 'b' + data.next };
+          snap('write', ids.join(', ') + ' -> re-summarize into T' + next.tier + ' summary', next);
+          data.active = data.active.filter(id => !ids.includes(id));
+          const parent = addBlock(tier + 1, groups, ids);
+          snap('promote', parent.id + ' (T' + parent.tier + ') created; four children remain stored', next);
+        }
+      }
+    }
+    const firstT1 = events.findIndex(e => e.kind === 'fold');
+    const firstT2 = events.findIndex(e => e.kind === 'promote' && e.action.tier === 2);
+    const firstT3 = events.findIndex(e => e.kind === 'promote' && e.action.tier === 3);
+    slider.max = events.length - 1;
+    let cursor = firstT2 - 3, selected = 'b3', pinned = false, focus = '';
+    let playing = false, timer = null, raf = null, retrieval = null, lastSignature = '';
+    let lastWidth = 0, layout = null, lastOptions = '';
+    let contextRaf = null, drawTarget = null;
+    const now = () => events[cursor];
+    const block = id => now().s.blocks.find(b => b.id === id);
+    const childrenOf = b => b.children.length ? b.children : b.groups.map(g => 'g' + g);
+    const countVisible = () => FIXED + now().s.raw.length * RAW + now().s.active.length * SUM + (retrieval?.added || 0);
+    const status = t => { el('status').textContent = t; };
+    function inputSnapshot() {
+      const s = now().s;
+      const inputs = [{ id: 'fixed', label: 'Fixed input', form: 'Instructions, tool definitions and protected messages', tokens: FIXED, refs: '' }];
+      s.active.map(id => block(id)).sort((a, b) => a.groups[0] - b.groups[0]).forEach(b => {
+        const first = Math.min(...b.groups), last = Math.max(...b.groups);
+        inputs.push({ id: b.id, label: b.id + ' · T' + b.tier, form: 'Batch ' + first + (first === last ? '' : '–' + last) + ' summary', tokens: SUM, refs: b.refs });
+      });
+      s.raw.forEach(g => inputs.push({ id: 'g' + g, label: 'Batch ' + g + '', form: 'Original', tokens: RAW, refs: span([g]) }));
+      if (retrieval) {
+        const b = block(retrieval.blockId);
+        inputs.push({
+          id: 'retrieval', label: retrieval.read ? 'Receipt + read result' : retrieval.destination === 'file' ? 'Restore receipt' : 'Restore result',
+          form: retrieval.read ? 'File path and original excerpt' : retrieval.destination === 'file' ? 'demo.txt file path' : b.children.join(', ') + ' summaries',
+          tokens: retrieval.added, refs: b.refs
+        });
+      }
+      return inputs;
+    }
+    function inputGeometry(items, width) {
+      let x = 3, y = 38;
+      const out = new Map();
+      for (const item of items) {
+        const size = item.id.startsWith('g') ? 116 : item.id === 'retrieval' ? 94 : 64;
+        if (x > 3 && x + size > width - 3) { x = 3; y += 58; }
+        out.set(item.id, { item, x, y, width: size, height: 46 });
+        x += size + 8;
+      }
+      return { items: out, height: y + 46 + 13 };
+    }
+    function asciiFrame(width, height, parent) {
+      const group = node('g', { class: 'bt-ascii-frame', 'aria-hidden': 'true' }, undefined, parent);
+      const top = text(0, 6, '', { class: 'bt-ascii-border', lengthAdjust: 'spacing' }, group);
+      const bottom = text(0, height, '', { class: 'bt-ascii-border', lengthAdjust: 'spacing' }, group);
+      const left = [18, 36].map(y => text(0, y, '|', { class: 'bt-ascii-border' }, group));
+      const right = [18, 36].map(y => text(width, y, '|', { class: 'bt-ascii-border', 'text-anchor': 'end' }, group));
+      const frame = { top, bottom, left, right };
+      resizeAscii(frame, width, height);
+      return frame;
+    }
+    function resizeAscii(frame, width, height) {
+      const line = '+' + '-'.repeat(Math.max(1, Math.round(width / 7.2) - 2)) + '+';
+      for (const node of [frame.top, frame.bottom]) { node.textContent = line; node.setAttribute('textLength', width); }
+      frame.bottom.setAttribute('y', height);
+      frame.left.forEach((node, i) => node.setAttribute('y', height * (i ? .78 : .39)));
+      frame.right.forEach((node, i) => { node.setAttribute('x', width); node.setAttribute('y', height * (i ? .78 : .39)); });
+    }
+    function drawInput(input, parent, ghost = false) {
+      const { item, x, y, width, height } = input;
+      const raw = item.id.startsWith('g'), summary = item.id.startsWith('b');
+      const tier = summary ? block(item.id)?.tier || 1 : 0;
+      const attrs = { transform: 'translate(' + x + ',' + y + ')', class: 'cursor-interaction', 'data-tooltip': item.label + ' · ' + item.form + ' · ' + fmt(item.tokens) + ' token' };
+      if (ghost) { attrs['data-ghost-input'] = item.id; attrs['aria-hidden'] = 'true'; }
+      else { attrs['data-input'] = item.id; attrs['data-tokens'] = item.tokens; attrs['data-source'] = item.refs; }
+      const group = node('g', attrs, undefined, parent);
+      const box = node('rect', { x: 0, y: 0, width, height, rx: 0, class: 'bt-input-box ' + (item.id === 'retrieval' ? 'bt-taken' : 'bt-t' + tier) + (item.id === selected ? ' bt-input-focus' : '') }, undefined, group);
+      const ascii = asciiFrame(width, height, group);
+      const title = raw ? 'Original ' + item.id.slice(1).padStart(2, '0') : summary ? item.id + ':T' + tier : item.id === 'fixed' ? 'Fixed' : retrieval?.read ? 'Excerpt' : retrieval?.destination === 'file' ? 'File path' : 'Summaries';
+      const label = text(width / 2, 18, title, { 'text-anchor': 'middle' }, group);
+      const sub = text(width / 2, 36, fmt(item.tokens), { 'text-anchor': 'middle', class: 'bt-muted' }, group);
+      return { ...input, group, box, label, sub, ascii };
+    }
+    function save() {
+      if (!stateStore?.setWidgetState) return;
+      const state = {
+        modelContent: { version: 2, view: 'summary-lineage-tree', step: cursor, event: now().text, selectedBlock: selected || null, focusedT2: focus, cumulativeNewTokens: now().s.groups.length * RAW, visibleTokens: countVisible(), visibleInputs: inputSnapshot(), retrieval: retrieval?.mode || null },
+        privateContent: { version: 2, cursor, selected, pinned, focus, retrieval }
+      };
+      lastSignature = JSON.stringify(state);
+      try { Promise.resolve(stateStore.setWidgetState(state)).catch(() => {}); } catch (_) {}
+    }
+    function node(tag, attrs = {}, text, parent = drawTarget || svg) {
+      const n = document.createElementNS(NS, tag);
+      for (const [key, value] of Object.entries(attrs)) n.setAttribute(key, String(value));
+      if (text !== undefined) n.textContent = text;
+      parent.appendChild(n); return n;
+    }
+    function text(x, y, value, attrs = {}, parent = drawTarget || svg) { return node('text', { x, y, ...attrs }, value, parent); }
+    function fit(n, full, width) {
+      let end = full.length;
+      n.textContent = full;
+      while (end > 0 && n.getComputedTextLength() > width) { end--; n.textContent = full.slice(0, end) + '…'; }
+      if (end < full.length) n.setAttribute('data-tooltip', full);
+      return n;
+    }
+    function subtree(id, nodes = new Set()) {
+      if (nodes.has(id)) return nodes;
+      nodes.add(id);
+      const b = block(id);
+      if (b) childrenOf(b).forEach(child => subtree(child, nodes));
+      return nodes;
+    }
+    function parentChain(id) {
+      const out = new Set([id]);
+      let more = true;
+      while (more) {
+        more = false;
+        for (const b of now().s.blocks) if (!out.has(b.id) && b.children.some(c => out.has(c))) { out.add(b.id); more = true; }
+      }
+      return out;
+    }
+    function chooseFocus() {
+      const b = block(selected), parents = b ? parentChain(b.id) : new Set();
+      const t2s = now().s.blocks.filter(b => b.tier === 2);
+      const ancestor = t2s.find(b => parents.has(b.id));
+      if (ancestor) focus = ancestor.id;
+      if (!t2s.some(b => b.id === focus)) focus = t2s[0]?.id || '';
+    }
+    function updatePicker() {
+      const s = now().s;
+      if (!pinned || !block(selected)) selected = s.blocks[s.blocks.length - 1]?.id || '';
+      chooseFocus();
+      const key = s.blocks.length + '|' + s.active.join(',');
+      if (key !== lastOptions) {
+        picker.replaceChildren();
+        if (!s.blocks.length) picker.add(new Option('No summary nodes yet', ''));
+        [...s.blocks].reverse().forEach(b => picker.add(new Option(b.id + ' · T' + b.tier + ' · ' + (s.active.includes(b.id) ? 'In model input' : 'Stored only') + ' / covers ' + b.groups.length + ' original batches', b.id)));
+        lastOptions = key;
+      }
+      picker.value = selected; picker.disabled = !s.blocks.length;
+    }
+    function paint() {
+      if (raf) cancelAnimationFrame(raf);
+      if (contextRaf) cancelAnimationFrame(contextRaf);
+      raf = null;
+      contextRaf = null;
+      drawTarget = svg;
+      const e = now(), s = e.s, b = block(selected);
+      const width = Math.max(280, root.getBoundingClientRect().width);
+      lastWidth = width;
+      const inputState = inputSnapshot();
+      const rack = inputGeometry(inputState, width);
+      const treeOffset = rack.height + 36;
+      const compact = width < 640 || (coarse.matches && width < 860);
+      const left = compact ? 55 : 49, right = width - 7, w = right - left;
+      const rows = { 3: 49, 2: 145, 1: 241, 0: 337 };
+      const draft = e.kind === 'write' && e.action?.target && !s.blocks.some(b => b.id === e.action.target) ? { id: e.action.target, tier: e.action.tier, groups: e.action.groups, children: e.action.children, pending: true } : null;
+      const blocks = draft ? [...s.blocks, draft] : s.blocks;
+      const nodes = new Map(), paths = [];
+      const fullSelected = b ? subtree(b.id) : new Set();
+      const ancestors = b ? parentChain(b.id) : new Set();
+      const picked = new Set([...fullSelected, ...ancestors]);
+      const retrieved = retrieval ? (retrieval.mode === 'full' ? subtree(retrieval.blockId) : new Set([retrieval.blockId, ...childrenOf(block(retrieval.blockId))])) : new Set();
+      let focused = blocks.find(b => b.id === focus);
+      const rawVisible = new Set();
+      const t2 = blocks.filter(b => b.tier === 2);
+      const t1 = blocks.filter(b => b.tier === 1);
+      const t3 = blocks.filter(b => b.tier === 3);
+      if (!focused && t2.length) focused = t2[0];
+      const selectedT2 = t2.find(parent => parent.id === selected || parent.children.includes(selected));
+      if (selectedT2) focused = selectedT2;
+      else if (!pinned && draft?.tier === 2) focused = draft;
+      const standalone = b?.tier === 1 && !t2.some(parent => parent.children.includes(b.id)) ? b : null;
+      const leafFocus = compact ? (!pinned && draft?.tier === 1 ? draft : standalone) : null;
+      if (leafFocus) focused = null;
+      const compressedGroups = focused ? focused.groups : [];
+      const lower = leafFocus ? [leafFocus, ...(b?.tier === 1 && b.id !== leafFocus.id ? [b] : [])].sort((a, b) => a.groups[0] - b.groups[0]) : compact && focused ? t1.filter(b => focused.children.includes(b.id)) : t1;
+      const plotGroups = leafFocus ? [...new Set(lower.flatMap(b => b.groups))].sort((a, b) => a - b) : compact && focused ? compressedGroups : s.groups;
+      const lowerCount = compact ? Math.max(4, lower.length, plotGroups.length) : 17;
+      const slot = w / lowerCount;
+      const xGroup = g => compact ? left + (Math.max(0, plotGroups.indexOf(g)) + .5) * slot : left + (g - .5) * slot;
+      const put = (b, x) => nodes.set(b.id, { ...b, x, y: rows[b.tier], width: b.tier >= 2 ? (compact ? 49 : 68) : Math.min(35, slot - 3), height: 34, active: s.active.includes(b.id) });
+      t3.forEach(b => put(b, compact ? left + w / 2 : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      t2.forEach((b, i) => put(b, compact ? left + (i + .5) * (w / 4) : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      lower.forEach((b, i) => put(b, compact ? left + (i + .5) * slot : (xGroup(Math.min(...b.groups)) + xGroup(Math.max(...b.groups))) / 2));
+      plotGroups.forEach(g => {
+        rawVisible.add(g);
+        nodes.set('g' + g, { id: 'g' + g, groups: [g], tier: 0, x: xGroup(g), y: rows[0], width: Math.min(35, slot - 3), height: 28, active: s.raw.includes(g) });
+      });
+      const extraRaw = compact ? s.raw.filter(g => !rawVisible.has(g)) : [];
+      extraRaw.forEach((g, i) => nodes.set('g' + g, { id: 'g' + g, groups: [g], tier: 0, x: left + w - 29 - i * 62, y: 413, width: 49, height: 30, active: true }));
+      const height = treeOffset + (extraRaw.length ? 449 : 393);
+      svg.replaceChildren();
+      svg.dataset.transitioning = 'false';
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+      svg.setAttribute('width', width); svg.setAttribute('height', height);
+      svg.setAttribute('data-layout', compact && (focused || leafFocus) ? 'branch' : 'complete');
+      node('title', { id: 'bt-title' }, 'Summary source tree / ' + e.text);
+      node('desc', { id: 'bt-desc' }, (compact && (focused || leafFocus) ? 'Branch view: sources of ' + (focused || leafFocus).id + '. ' : 'Full source tree。') + 'Parents point down to their sources. ' + s.blocks.length + ' summary nodes, ' + s.groups.length + ' original batches. Only active nodes enter model input.');
+      const inputHeading = text(3, 16, 'Current model input', { 'data-bt': 'input-heading' });
+      const rackGroup = node('g', { 'data-input-rack': 'true', role: 'group', 'aria-label': 'Model input' });
+      const inputNodes = new Map();
+      for (const input of rack.items.values()) inputNodes.set(input.item.id, drawInput(input, rackGroup));
+      text(3, treeOffset - 13, 'Source tree / parent -> source', { class: 'bt-muted' });
+      const forest = node('g', { transform: 'translate(0,' + treeOffset + ')', 'data-forest': 'true' });
+      drawTarget = forest;
+      const defs = node('defs');
+      const marker = node('marker', { id: 'bt-arrow', viewBox: '0 0 7 7', refX: 6, refY: 3.5, markerWidth: 5, markerHeight: 5, orient: 'auto' }, undefined, defs);
+      node('path', { d: 'M1,1 L6,3.5 L1,6', fill: 'none', stroke: 'var(--muted-foreground)', 'stroke-width': 1 }, undefined, marker);
+      [3, 2, 1, 0].forEach(t => {
+        text(2, rows[t] + 4, t ? 'T' + t : 'Raw', { class: 'bt-muted' });
+        if (![...nodes.values()].some(n => n.tier === t)) text(left + w / 2, rows[t] + 4, t ? 'Not formed' : 'No messages', { class: 'bt-muted', 'text-anchor': 'middle' });
+      });
+      const edgeGroup = node('g', { 'aria-hidden': 'true' });
+      for (const n of nodes.values()) {
+        if (!n.tier) continue;
+        for (const source of childrenOf(n)) {
+          const child = nodes.get(source);
+          if (!child) continue;
+          const y1 = n.y + n.height / 2 + 1, y2 = child.y - child.height / 2 - 3;
+          const middle = (y1 + y2) / 2;
+          const isRetrieved = retrieved.has(n.id) && retrieved.has(child.id);
+          const emphasized = picked.has(n.id) && picked.has(child.id);
+          const path = node('path', { d: 'M' + n.x + ',' + y1 + ' V' + middle + ' H' + child.x + ' V' + y2, class: 'bt-edge' + (isRetrieved ? ' bt-edge-retrieve' : emphasized ? ' bt-edge-focus' : ''), 'data-parent': n.id, 'data-child': child.id }, undefined, edgeGroup);
+          text(child.x, y2 + 4, 'v', { 'text-anchor': 'middle', class: isRetrieved ? 'bt-node-label-taken' : 'bt-muted' }, edgeGroup);
+          if (Math.abs(n.x - child.x) > 5) text(child.x, middle + 4, '+', { 'text-anchor': 'middle', class: 'bt-muted' }, edgeGroup);
+          paths.push({ parent: n.id, child: child.id, path, tier: n.tier });
+        }
+      }
+      const shapes = new Map();
+      for (const n of nodes.values()) {
+        const isRaw = !n.tier;
+        const sourceText = isRaw ? 'Batch ' + n.groups[0] + ' original batches · ' + span(n.groups) : n.id + ' · T' + n.tier + ' · ' + n.groups.length + ' source batches / ' + (n.pending ? 'Generating' : n.active ? 'In model input' : 'Stored only');
+        const group = node('g', { 'data-node': n.id, 'data-tier': n.tier, 'data-active': n.active, 'data-pending': Boolean(n.pending), 'data-tooltip': sourceText, class: isRaw || n.pending ? '' : 'cursor-interaction', 'aria-hidden': 'true' });
+        const className = 'bt-node bt-t' + n.tier + (n.active ? ' bt-active' : ' bt-archive') + (n.id === selected ? ' bt-selected' : '') + (n.pending ? ' bt-pending' : '') + (retrieved.has(n.id) ? ' bt-taken' : '');
+        node('rect', { x: n.x - n.width / 2, y: n.y - n.height / 2, width: n.width, height: n.height, rx: 0, class: className, opacity: 0 }, undefined, group);
+        node('rect', { x: n.x - Math.min(slot - 1, Math.max(n.width, coarse.matches ? 44 : 32)) / 2, y: n.y - 22, width: Math.min(slot - 1, Math.max(n.width, coarse.matches ? 44 : 32)), height: 44, fill: 'transparent' }, undefined, group);
+        const nodeId = isRaw ? String(n.groups[0]).padStart(2, '0') : n.id;
+        const value = n.pending ? '{' + nodeId + '}' : n.active ? '[' + nodeId + ']' : '(' + nodeId + ')';
+        text(n.x, n.y + 4, value, { 'text-anchor': 'middle', class: retrieved.has(n.id) ? 'bt-node-label-taken' : '' }, group);
+        if (n.id === selected) text(n.x, n.y - 23, '*', { 'text-anchor': 'middle' }, group);
+        if (n.pending) text(n.x, n.y - 24, 'Pending', { 'text-anchor': 'middle', class: 'bt-muted' });
+        if (compact && n.tier === 2 && n.id !== focused?.id) text(n.x, n.y + 35, '+' + n.children.length + ' T1', { 'text-anchor': 'middle', class: 'bt-muted' });
+        shapes.set(n.id, group);
+      }
+      if (extraRaw.length) {
+        text(2, 417, 'Recent', { class: 'bt-muted' });
+        fit(text(left, 417, 'Original input / 50K each', { class: 'bt-muted' }), 'Original input / 50K each', w - extraRaw.length * 62 - 15);
+      } else if (s.raw.length) {
+        const latest = nodes.get('g' + s.raw[s.raw.length - 1]);
+        if (latest) text(latest.x, latest.y + 33, 'Recent', { class: 'bt-muted', 'text-anchor': 'middle' });
+      }
+      layout = { nodes, paths, shapes, inputs: inputNodes, inputHeading, rackGroup, forest, treeOffset, height, width, cursor, tokens: countVisible() };
+      const selectedBlock = block(selected);
+      el('history').textContent = fmt(s.groups.length * RAW);
+      el('visible').textContent = fmt(countVisible());
+      el('input-a11y').textContent = inputState.map(item => item.label + '，' + item.form + '，' + fmt(item.tokens) + ' token').join('; ');
+      el('counter').textContent = cursor + ' / ' + (events.length - 1);
+      slider.value = cursor;
+      slider.setAttribute('aria-valuetext', e.text);
+      el('event').textContent = retrieval ? retrieval.read ? 'read: load an exact excerpt' : 'Restore preview / ' + retrieval.blockId : e.text;
+      el('scope').textContent = compact && (focused || leafFocus) ? 'Branch: ' + (focused || leafFocus).id : 'Full source tree';
+      el('next').disabled = cursor >= events.length - 1;
+      ['one', 'full', 'file'].forEach(key => { el(key).disabled = !selectedBlock; });
+      el('read').hidden = !retrieval || retrieval.destination !== 'file' || retrieval.read;
+      if (!selectedBlock) el('detail').textContent = 'Original batches are at the bottom; summaries become their parent nodes.';
+      else if (retrieval) {
+        const src = block(retrieval.blockId);
+        if (retrieval.read) el('detail').textContent = span([src.groups[0]]) + ': TTL=3600s; refresh and retry after 401. Exact text from storage.';
+        else if (retrieval.destination === 'file') el('detail').textContent = (retrieval.automatic ? 'Large text exported: ' : 'toFile: ') + fmt(retrieval.bodyTokens) + ' token → demo.txt (simulated); only the file receipt enters input.';
+        else el('detail').textContent = 'Restore one tier: ' + src.id + ' → ' + src.children.join(', ') + '; source summaries return as a tool result.';
+      } else {
+        const sources = selectedBlock.children.length ? selectedBlock.children.join(', ') : span(selectedBlock.groups);
+        el('detail').textContent = selectedBlock.id + ' (T' + selectedBlock.tier + ')→ ' + sources + ' / covers ' + fmt(selectedBlock.groups.length * RAW) + ' token originals.';
+      }
+    }
+    function animate(direction, mode = 'one') {
+      if (reduced.matches || !layout) return;
+      const { paths, shapes } = layout;
+      let chosen = [], rootId;
+      if (direction === 'up') {
+        rootId = now().action?.target;
+        chosen = paths.filter(p => p.parent === rootId);
+      } else {
+        rootId = selected;
+        const all = subtree(rootId);
+        chosen = mode === 'full' ? paths.filter(p => all.has(p.parent) && all.has(p.child)) : paths.filter(p => p.parent === rootId);
+      }
+      if (!chosen.length) return;
+      const rootTier = block(rootId)?.tier || now().action?.tier || 1;
+      const duration = direction === 'down' && mode === 'full' ? rootTier * 520 + 250 : 720;
+      const pulses = chosen.map(p => ({ ...p, length: p.path.getTotalLength(), delay: direction === 'down' && mode === 'full' ? (rootTier - p.tier) * 520 : 0, dot: node('text', { x: 0, y: 0, 'text-anchor': 'middle', class: direction === 'down' ? 'bt-node-label-taken' : '', 'aria-hidden': 'true', 'data-pulse': 'true', visibility: 'hidden' }, '*') }));
+      const born = direction === 'up' ? shapes.get(rootId) : null;
+      const started = performance.now();
+      function frame(t) {
+        const elapsed = t - started;
+        for (const p of pulses) {
+          const f = (elapsed - p.delay) / (direction === 'down' && mode === 'full' ? 650 : 720);
+          p.dot.setAttribute('visibility', f >= 0 && f < 1 ? 'visible' : 'hidden');
+          if (f >= 0 && f <= 1) {
+            const fraction = direction === 'up' ? 1 - f : f;
+            const point = p.path.getPointAtLength(p.length * fraction);
+            p.dot.setAttribute('x', point.x); p.dot.setAttribute('y', point.y + 4);
+          }
+        }
+        if (born) born.setAttribute('transform', 'translate(0,' + (18 * Math.max(0, 1 - elapsed / 720)) + ')');
+        if (elapsed < duration && root.isConnected) raf = requestAnimationFrame(frame);
+        else { pulses.forEach(p => p.dot.remove()); if (born) born.removeAttribute('transform'); raf = null; }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function animateContext(before) {
+      if (reduced.matches || !before || !layout || Math.abs(before.width - layout.width) > 1) return;
+      const after = layout;
+      const event = now();
+      const replacingReceipt = before.inputs.has('retrieval') && after.inputs.has('retrieval') && before.inputs.get('retrieval').item.tokens !== after.inputs.get('retrieval').item.tokens;
+      const fresh = [...after.inputs.values()].filter(n => !before.inputs.has(n.item.id) || (n.item.id === 'retrieval' && replacingReceipt));
+      const leaving = [...before.inputs.values()].filter(n => !after.inputs.has(n.item.id) || (n.item.id === 'retrieval' && replacingReceipt));
+      const common = [...after.inputs.values()].filter(n => before.inputs.has(n.item.id) && !(n.item.id === 'retrieval' && replacingReceipt));
+      const changed = fresh.length || leaving.length || common.some(n => { const old = before.inputs.get(n.item.id); return old.x !== n.x || old.y !== n.y; });
+      const pending = !changed && ['write', 'nudge'].includes(event.kind);
+      if (!changed && !pending) return;
+      const sourceIds = retrieval ? [] : event.action?.children?.length ? event.action.children : (event.action?.groups || []).map(g => 'g' + g);
+      const sources = sourceIds.map(id => before.inputs.get(id)).filter(Boolean);
+      const overlay = node('g', { 'data-context-motion': 'true', 'aria-hidden': 'true' }, undefined, svg);
+      const ghosts = leaving.map(old => ({ old, visual: drawInput(old, overlay, true) }));
+      const arrivals = fresh.map(target => {
+        let origin;
+        if (!retrieval && target.item.id === event.action?.target && sources.length) {
+          const x1 = Math.min(...sources.map(s => s.x));
+          const x2 = Math.max(...sources.map(s => s.x + s.width));
+          const width = Math.min(after.width - 6, Math.max(target.width, x2 - x1));
+          origin = { x: Math.min(x1, after.width - width - 3), y: sources.reduce((v, s) => v + s.y, 0) / sources.length, width, height: 46 };
+        } else {
+          const id = retrieval ? selected : target.item.id;
+          let source = after.nodes.get(id) || before.nodes.get(id);
+          if (retrieval) {
+            const b = block(selected);
+            const ids = retrieval.mode === 'full' || retrieval.read ? b.groups.map(g => 'g' + g) : childrenOf(b);
+            const origins = ids.map(id => after.nodes.get(id)).filter(Boolean);
+            if (origins.length) source = { x: origins.reduce((v, s) => v + s.x, 0) / origins.length, y: origins.reduce((v, s) => v + s.y, 0) / origins.length, width: origins[0].width, height: origins[0].height };
+          }
+          origin = source ? { x: source.x - source.width / 2, y: after.treeOffset + source.y - source.height / 2, width: source.width, height: source.height } : { x: target.x, y: target.y + 50, width: target.width, height: target.height };
+        }
+        return { target, origin };
+      });
+      const primary = fresh.find(n => n.item.id === event.action?.target) || fresh[0];
+      const flyDelay = retrieval ? (retrieval.mode === 'full' || retrieval.read ? 950 : 650) : 0;
+      const duration = retrieval ? flyDelay + 950 : ['fold', 'promote'].includes(event.kind) ? 1450 : pending ? 820 : 950;
+      const maxHeight = Math.max(before.height, after.height);
+      svg.setAttribute('viewBox', '0 0 ' + after.width + ' ' + maxHeight);
+      svg.setAttribute('height', maxHeight);
+      svg.dataset.transitioning = 'true';
+      svg.dataset.transitionKind = retrieval ? 'retrieve' : event.kind;
+      after.inputHeading.textContent = pending ? 'Writing a summary; input stays unchanged' : retrieval ? 'Restored content enters the next input' : event.kind === 'promote' ? 'Several summaries merge into one input block' : event.kind === 'fold' ? 'Original messages shrink into a summary' : 'New content enters model input';
+      const ease = t => t * t * (3 - 2 * t);
+      const mix = (a, b, p) => a + (b - a) * p;
+      function place(v, x, y, width, height) {
+        v.group.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+        v.box.setAttribute('width', width); v.box.setAttribute('height', height);
+        v.label.setAttribute('x', width / 2); v.sub.setAttribute('x', width / 2);
+        v.label.setAttribute('y', height * .39); v.sub.setAttribute('y', height * .78);
+        if (v.ascii) resizeAscii(v.ascii, width, height);
+      }
+      function update(progress) {
+        const p = ease(progress);
+        common.forEach(v => {
+          const old = before.inputs.get(v.item.id);
+          const bounce = pending && sourceIds.includes(v.item.id) ? -4 * Math.sin(progress * Math.PI) : 0;
+          place(v, mix(old.x, v.x, p), mix(old.y, v.y, p) + bounce, mix(old.width, v.width, p), mix(old.height, v.height, p));
+          if (pending && sourceIds.includes(v.item.id)) v.box.setAttribute('stroke', 'var(--foreground)');
+        });
+        for (const { old, visual } of ghosts) {
+          const archived = after.nodes.get(old.item.id);
+          const destination = primary ? { x: primary.x, y: primary.y, width: primary.width, height: primary.height } : archived ? { x: archived.x - archived.width / 2, y: after.treeOffset + archived.y - archived.height / 2, width: archived.width, height: archived.height } : { ...old, y: old.y + 55 };
+          place(visual, mix(old.x, destination.x, p), mix(old.y, destination.y, p), mix(old.width, destination.width, p), mix(old.height, destination.height, p));
+          visual.group.setAttribute('opacity', Math.max(0, 1 - Math.max(0, progress - .48) / .38));
+        }
+        for (const { target, origin } of arrivals) {
+          const local = retrieval ? Math.max(0, Math.min(1, (progress * duration - flyDelay) / 950)) : progress;
+          const q = ease(local);
+          place(target, mix(origin.x, target.x, q), mix(origin.y, target.y, q), mix(origin.width, target.width, q), mix(origin.height, target.height, q));
+          const merging = !retrieval && target.item.id === event.action?.target && sources.length;
+          target.group.setAttribute('opacity', merging ? Math.max(0, Math.min(1, (progress - .42) / .38)) : local > 0 ? 1 : 0);
+        }
+        after.forest.setAttribute('transform', 'translate(0,' + mix(before.treeOffset, after.treeOffset, p) + ')');
+        el('visible').textContent = fmt(Math.round(mix(before.tokens, after.tokens, p) / 100) * 100);
+      }
+      const started = performance.now();
+      update(0);
+      function frame(t) {
+        if (!root.isConnected || layout !== after) return;
+        const progress = Math.min(1, (t - started) / duration);
+        update(progress);
+        if (progress < 1) contextRaf = requestAnimationFrame(frame);
+        else {
+          overlay.remove();
+          [...after.inputs.values()].forEach(v => { place(v, v.x, v.y, v.width, v.height); v.group.setAttribute('opacity', '1'); });
+          after.forest.setAttribute('transform', 'translate(0,' + after.treeOffset + ')');
+          after.inputHeading.textContent = 'Current model input';
+          el('visible').textContent = fmt(after.tokens);
+          svg.setAttribute('viewBox', '0 0 ' + after.width + ' ' + after.height); svg.setAttribute('height', after.height);
+          svg.dataset.transitioning = 'false'; contextRaf = null;
+        }
+      }
+      contextRaf = requestAnimationFrame(frame);
+    }
+    function render(motion = false) {
+      const before = layout;
+      updatePicker(); paint();
+      if (motion) { animate(retrieval ? 'down' : 'up', retrieval?.mode === 'full' ? 'full' : 'one'); animateContext(before); }
+    }
+    function stop() {
+      playing = false; clearTimeout(timer); timer = null;
+      el('play').setAttribute('aria-pressed', 'false');
+      el('play').textContent = cursor === events.length - 1 ? 'Replay' : 'Play animation';
+    }
+    function go(n, motion = true, persist = true) {
+      cursor = Math.max(0, Math.min(events.length - 1, Math.round(n)));
+      retrieval = null;
+      render(motion);
+      if (!playing) stop();
+      if (persist) save();
+    }
+    function tick() {
+      if (!playing) return;
+      if (!root.isConnected || cursor >= events.length - 1) { stop(); save(); return; }
+      go(cursor + 1, true, false);
+      if (cursor >= events.length - 1) { stop(); save(); status('T3 is complete; source blocks and original messages remain stored.'); return; }
+      timer = setTimeout(tick, reduced.matches ? 1150 : ['fold', 'promote'].includes(now().kind) ? 1750 : 1050);
+    }
+    function choose(id) {
+      if (!block(id)) return;
+      stop(); selected = id; pinned = true; retrieval = null; render(); save();
+    }
+    function restore(mode) {
+      const b = block(selected);
+      if (!b) return;
+      stop();
+      const bodyTokens = mode === 'full' || b.tier === 1 ? b.groups.length * RAW : b.children.length * SUM;
+      const automatic = mode !== 'file' && bodyTokens * 2 > 10000;
+      const destination = automatic || mode === 'file' ? 'file' : 'inline';
+      retrieval = { blockId: b.id, mode, bodyTokens, destination, automatic, read: false, added: destination === 'file' ? 100 : bodyTokens };
+      render(true); status(el('detail').textContent); save();
+    }
+    function saved(state) {
+      const p = state?.privateContent;
+      if (p?.version !== 2 || !Number.isInteger(p.cursor)) return false;
+      stop(); cursor = Math.max(0, Math.min(events.length - 1, p.cursor));
+      selected = typeof p.selected === 'string' ? p.selected : ''; pinned = Boolean(p.pinned);
+      focus = typeof p.focus === 'string' ? p.focus : ''; retrieval = null;
+      if (p.retrieval && block(p.retrieval.blockId) && ['one', 'full', 'file'].includes(p.retrieval.mode)) {
+        const b = block(p.retrieval.blockId), mode = p.retrieval.mode;
+        const bodyTokens = mode === 'full' || b.tier === 1 ? b.groups.length * RAW : b.children.length * SUM;
+        const automatic = mode !== 'file' && bodyTokens * 2 > 10000;
+        const destination = automatic || mode === 'file' ? 'file' : 'inline';
+        const read = destination === 'file' && p.retrieval.read === true;
+        retrieval = { blockId: b.id, mode, bodyTokens, automatic, destination, read, added: read ? 300 : destination === 'file' ? 100 : bodyTokens };
+        selected = b.id; pinned = true;
+      }
+      return true;
+    }
+    slider.addEventListener('input', () => { stop(); go(Number(slider.value)); });
+    el('next').addEventListener('click', () => { stop(); go(cursor + 1); });
+    el('play').addEventListener('click', () => {
+      if (playing) { stop(); save(); return; }
+      if (cursor >= events.length - 1) go(0, false, false);
+      retrieval = null; pinned = false; playing = true;
+      el('play').textContent = 'Pause'; el('play').setAttribute('aria-pressed', 'true');
+      render(); save(); tick();
+    });
+    [['jump-t1', firstT1], ['jump-t2', firstT2], ['jump-t3', firstT3]].forEach(([key, value]) => el(key).addEventListener('click', () => { stop(); pinned = false; go(value - 1, false, false); go(value); }));
+    picker.addEventListener('change', () => choose(picker.value));
+    svg.addEventListener('click', event => { const n = event.target.closest('[data-node], [data-input]'); if (n) choose(n.getAttribute('data-node') || n.getAttribute('data-input')); });
+    ['one', 'full', 'file'].forEach(mode => el(mode).addEventListener('click', () => restore(mode)));
+    el('read').addEventListener('click', () => {
+      if (!retrieval || retrieval.destination !== 'file') return;
+      retrieval.read = true; retrieval.added = 300;
+      render(true); save();
+    });
+    window.addEventListener('explainer:set_globals', event => {
+      const next = event.detail?.globals?.widgetState;
+      if (next && JSON.stringify(next) !== lastSignature && saved(next)) render();
+    });
+    new ResizeObserver(() => { const w = Math.max(280, root.getBoundingClientRect().width); if (Math.abs(w - lastWidth) > 1) paint(); }).observe(root);
+    document.addEventListener('visibilitychange', () => { if (document.hidden && playing) { stop(); save(); } });
+    coarse.addEventListener('change', () => paint());
+    if (stateStore?.widgetState) saved(stateStore.widgetState);
+    render();
+  })();
+  </script>
+</div>
+</section>
+  <p class="distinction">Default restore returns the previous layer; full:true requests original messages. Large text may be written to a file before it is read. Delegation is a separate mechanism and can use compression inside the child session.</p>
+  <section id="delegate" aria-label="Pi delegation"><div id="acp-delegate-explainer">
+  <style>
+    #acp-delegate-explainer { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * 1); color: var(--foreground); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    #acp-delegate-explainer .ad-heading { padding-right: 90px; }
+    #acp-delegate-explainer .ad-controls { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .5); }
+    #acp-delegate-explainer .ad-between { display: flex; flex-wrap: wrap; justify-content: space-between; gap: calc(var(--font-size-base) * .5); }
+    #acp-delegate-explainer .ad-svg { width: 100%; display: block; }
+    #acp-delegate-explainer .ad-svg text { fill: var(--foreground); font-size: 12px; }
+    #acp-delegate-explainer .ad-svg .ad-muted { fill: var(--muted-foreground); }
+    #acp-delegate-explainer .ad-svg .ad-path { fill: none; stroke: var(--border); stroke-width: 1.25; }
+    #acp-delegate-explainer .ad-svg .ad-box { stroke: none; fill: var(--background); }
+    #acp-delegate-explainer .ad-svg .ad-ascii-border { fill: var(--muted-foreground); }
+    #acp-delegate-explainer .ad-foot { display: flex; flex-direction: column; gap: calc(var(--font-size-base) * .25); }
+  </style>
+  <div class="ad-heading"><h2>acp_delegate: an independent task session</h2><div class="text-small text-muted">ASCII / Pi / async=true</div></div>
+  <div class="ad-controls">
+    <div class="viz-controls"><button type="button" class="btn btn-primary" data-ad="play" aria-pressed="false">Play delegation</button><button type="button" class="btn" data-ad="next">Next</button><span class="text-small tabular-nums" data-ad="counter">0 / 7</span></div>
+    <label class="form-label" for="ad-progress">Delegate -> explore -> return</label>
+    <input class="form-range" id="ad-progress" type="range" min="0" max="7" step="1" value="0" aria-label="Delegated task progress">
+    <div data-ad="stage" class="text-small" aria-live="polite"></div>
+  </div>
+  <svg class="ad-svg" data-ad="svg" role="img" aria-labelledby="ad-title ad-desc"><title id="ad-title">Task and result flow between parent and child sessions</title><desc id="ad-desc">The parent sends a self-contained task to a fresh Pi process. The child explores files, saves its results, and returns receipts and requested output.</desc></svg>
+  <div class="ad-foot text-small text-muted"><span>Separate contexts / shared cwd by default / task sent via stdin</span><span>Model: call override -> role default -> parent. Print / JSON mode uses synchronous execution.</span></div>
+  <div class="sr-only" data-ad="summary" role="status" aria-live="polite"></div>
+  <script>
+  (() => {
+    const stateStore = window.createExplainerState('delegate');
+    const root = document.getElementById('acp-delegate-explainer');
+    const get = key => root.querySelector('[data-ad="' + key + '"]');
+    const svg = get('svg'), slider = root.querySelector('#ad-progress');
+    const NS = 'http://www.w3.org/2000/svg';
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const stages = [
+      'The parent prepares a self-contained research task.',
+      'acp_delegate starts a fresh Pi process and session.',
+      'Task enters via stdin; runId immediately returns to the parent.',
+      'The child reads code while the parent can continue its work.',
+      'Search results accumulate in the child context.',
+      'The child finishes; its output and execution records are saved.',
+      'acp_delegate_wait returns status, file path and a short preview.',
+      'read opens the output in the parent; exploration logs stay in the child.'
+    ];
+    let step = 0, playing = false, timer = null, raf = null, lastWidth = 0, view = null, signature = '';
+    function n(tag, attrs = {}, content, parent = svg) {
+      const node = document.createElementNS(NS, tag);
+      for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+      if (content !== undefined) node.textContent = content;
+      parent.appendChild(node); return node;
+    }
+    function label(x, y, content, attrs = {}, parent = svg) { return n('text', { x, y, ...attrs }, content, parent); }
+    function fit(node, value, max) {
+      let end = value.length;
+      node.textContent = value;
+      while (end && node.getComputedTextLength() > max) { end--; node.textContent = value.slice(0, end) + '…'; }
+      if (end < value.length) node.setAttribute('data-tooltip', value);
+    }
+    function items() {
+      const parent = [
+        { id: 'h1', title: 'History 1', sub: 'Parent', type: 'neutral' },
+        { id: 'h2', title: 'History 2', sub: 'Parent', type: 'neutral' },
+        { id: 'task', title: 'Task', sub: 'Find 401 cause', type: 'task' }
+      ];
+      if (step >= 1) parent.push({ id: 'call', title: 'delegate()', sub: 'Task brief', type: 'task' });
+      if (step >= 2) parent.push({ id: 'run', title: 'runId', sub: 'del_demo', type: 'task' });
+      if (step >= 3) parent.push({ id: 'continue', title: 'Continue', sub: 'In parallel', type: 'neutral' });
+      if (step >= 6) parent.push({ id: 'receipt', title: 'Receipt', sub: 'Path + preview', type: 'result' });
+      if (step >= 7) parent.push({ id: 'full', title: 'Full result', sub: 'read(.out)', type: 'result' });
+      const child = [];
+      if (step >= 2) child.push({ id: 'role', title: 'Role/system', sub: 'researcher', type: 'task' }, { id: 'child-task', title: 'Task brief', sub: 'Find 401 cause', type: 'task' });
+      if (step >= 3) child.push({ id: 'read', title: 'Read code', sub: 'auth.ts excerpt', type: 'work' });
+      if (step >= 4) child.push({ id: 'grep', title: 'Search hits', sub: 'Refresh flow', type: 'work' });
+      if (step >= 5) child.push({ id: 'answer', title: 'Findings', sub: 'Cause/evidence', type: 'result' });
+      return { parent, child };
+    }
+    function positions(list, width, top) {
+      const columns = Math.max(2, Math.floor((width + 8) / 100));
+      const tile = Math.min(108, (width - (columns - 1) * 8) / columns);
+      return { columns, height: Math.max(1, Math.ceil(list.length / columns)) * 58, nodes: list.map((item, i) => ({ ...item, x: (i % columns) * (tile + 8), y: top + Math.floor(i / columns) * 58, w: tile, h: 46 })) };
+    }
+    function tile(p, parent, ghost = false) {
+      const group = n('g', { transform: 'translate(' + p.x + ',' + p.y + ')', ...(ghost ? { 'data-flying': p.id, 'aria-hidden': 'true' } : { 'data-message': p.id }) }, undefined, parent);
+      const box = n('rect', { x: 0, y: 0, width: p.w, height: p.h, rx: 0, class: 'ad-box ad-' + p.type }, undefined, group);
+      const line = '+' + '-'.repeat(Math.max(1, Math.round(p.w / 7.2) - 2)) + '+';
+      [6, p.h].forEach(y => label(0, y, line, { textLength: p.w, lengthAdjust: 'spacing', class: 'ad-ascii-border', 'aria-hidden': 'true' }, group));
+      [18, 36].forEach(y => {
+        label(0, y, '|', { class: 'ad-ascii-border', 'aria-hidden': 'true' }, group);
+        label(p.w, y, '|', { class: 'ad-ascii-border', 'text-anchor': 'end', 'aria-hidden': 'true' }, group);
+      });
+      fit(label(p.w / 2, 18, p.title, { 'text-anchor': 'middle' }, group), p.title, p.w - 18);
+      fit(label(p.w / 2, 36, p.sub, { 'text-anchor': 'middle', class: 'ad-muted' }, group), p.sub, p.w - 18);
+      return { ...p, group, box };
+    }
+    function arrow(x1, y1, x2, y2, text, extra = {}) {
+      const middle = (y1 + y2) / 2;
+      const path = n('path', { d: 'M' + x1 + ',' + y1 + ' V' + middle + ' H' + x2 + ' V' + y2, class: 'ad-path', ...extra });
+      label(x2, y2 + 4, y2 >= y1 ? 'v' : '^', { 'text-anchor': 'middle', class: 'ad-muted' });
+      if (Math.abs(x1 - x2) > 5) label(x2, middle + 4, '+', { 'text-anchor': 'middle', class: 'ad-muted' });
+      if (text) label((x1 + x2) / 2 + 7, (y1 + y2) / 2 - 5, text, { class: 'ad-muted' });
+      return path;
+    }
+    function paint() {
+      if (raf) cancelAnimationFrame(raf); raf = null;
+      const width = Math.max(280, root.getBoundingClientRect().width), small = width < 520;
+      lastWidth = width;
+      const all = items();
+      const parent = positions(all.parent, width - 4, 37);
+      const bridgeY = parent.height + 73;
+      const childTop = bridgeY + 84;
+      const child = positions(all.child, width - 4, childTop + 31);
+      const filesY = childTop + child.height + 80;
+      const height = filesY + (small ? 123 : 89);
+      svg.replaceChildren();
+      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height); svg.setAttribute('width', width); svg.setAttribute('height', height); svg.dataset.animating = 'false';
+      n('title', { id: 'ad-title' }, 'acp_delegate · ' + stages[step]);
+      n('desc', { id: 'ad-desc' }, 'Parent input: ' + all.parent.map(i => i.title).join(', ') + '. Child input: ' + all.child.map(i => i.title).join(', ') + '. Shared cwd by default.');
+      const defs = n('defs');
+      const marker = n('marker', { id: 'ad-arrow', viewBox: '0 0 8 8', refX: 7, refY: 4, markerWidth: 6, markerHeight: 6, orient: 'auto' }, undefined, defs);
+      n('path', { d: 'M1,1 L7,4 L1,7', fill: 'none', stroke: 'var(--muted-foreground)', 'stroke-width': 1.2 }, undefined, marker);
+      label(2, 16, 'Parent / existing Pi process');
+      const parentG = n('g', { 'data-context': 'parent', role: 'group', 'aria-label': 'Parent model input' });
+      const nodes = new Map();
+      parent.nodes.forEach(p => nodes.set(p.id, tile(p, parentG)));
+      const process = { id: 'process', x: 2, y: bridgeY, w: small ? width - 4 : 250, h: 48, title: 'spawn(node, pi CLI)', sub: 'New process / new session', type: step >= 1 ? 'task' : 'neutral' };
+      const processNode = tile(process, svg);
+      if (!small) {
+        label(274, bridgeY + 18, 'task → stdin', { class: 'ad-muted' });
+        fit(label(274, bridgeY + 39, 'Model, tools and cwd as startup options', { class: 'ad-muted' }), 'Model, tools and cwd as startup options', width - 278);
+      }
+      const childLabel = 'Child / ' + (step < 2 ? 'Waiting' : step >= 5 ? 'Completed' : 'Own context');
+      label(2, childTop + 10, childLabel);
+      const childG = n('g', { 'data-context': 'child', role: 'group', 'aria-label': 'Child model input' });
+      child.nodes.forEach(p => nodes.set(p.id, tile(p, childG)));
+      if (!child.nodes.length) fit(label(2, childTop + 58, 'Role + task + independently read project data', { class: 'ad-muted' }), 'Role + task + independently read project data', width - 4);
+      const folderW = small ? width - 4 : 250;
+      const code = { id: 'workspace', x: 2, y: filesY, w: folderW, h: 48, title: 'Shared workspace', sub: 'Code / project instructions', type: 'neutral' };
+      const codeNode = tile(code, svg);
+      const result = { id: 'files', x: small ? 2 : 278, y: small ? filesY + 62 : filesY, w: small ? width - 4 : Math.max(180, width - 282), h: 48, title: step >= 5 ? 'del_demo.out' : 'Output files (pending)', sub: '.out / .activity / .session.jsonl', type: step >= 5 ? 'result' : 'neutral' };
+      const fileNode = tile(result, svg);
+      const paths = [];
+      if (step >= 1) {
+        const call = nodes.get('call');
+        paths.push({ id: 'spawn', path: arrow(call.x + call.w / 2, call.y + call.h, process.x + process.w / 2, process.y - 3) });
+      }
+      if (step >= 2) {
+        const task = nodes.get('child-task');
+        paths.push({ id: 'task', path: arrow(process.x + process.w / 2, process.y + process.h, task.x + task.w / 2, task.y - 3) });
+      }
+      if (step >= 3) {
+        const read = nodes.get('read');
+        paths.push({ id: 'workspace', path: arrow(code.x + code.w / 2, code.y - 3, read.x + read.w / 2, read.y + read.h + 3) });
+      }
+      view = { width, height, nodes, process: processNode, code: codeNode, file: fileNode, paths };
+      slider.value = step; slider.setAttribute('aria-valuetext', stages[step]);
+      get('counter').textContent = step + ' / 7'; get('stage').textContent = stages[step];
+      get('next').disabled = step === 7;
+      get('summary').textContent = stages[step];
+    }
+    function motion(before) {
+      if (reduced.matches || !before || !view || before.width !== view.width) return;
+      const current = view, overlay = n('g', { 'data-motion': 'true', 'aria-hidden': 'true' });
+      const flights = [];
+      function add(id, from, to, title, sub, type) {
+        if (!from || !to) return;
+        const p = { id, x: from.x, y: from.y, w: to.w, h: 46, title, sub, type };
+        const item = tile(p, overlay, true);
+        flights.push({ item, from, to });
+      }
+      if (step === 1) add('launch', current.nodes.get('call'), current.process, 'Start Pi', 'New process / session', 'task');
+      if (step === 2) {
+        add('task-payload', current.process, current.nodes.get('child-task'), 'Task brief', 'Find 401 cause', 'task');
+        add('run-receipt', current.process, current.nodes.get('run'), 'runId', 'del_demo', 'task');
+      }
+      if (step === 3) add('code-content', current.code, current.nodes.get('read'), 'Code excerpt', 'auth.ts', 'work');
+      if (step === 4) add('search-content', current.code, current.nodes.get('grep'), 'Search hits', 'Refresh flow', 'work');
+      if (step === 5) add('write-result', current.nodes.get('answer'), current.file, 'Save result', 'Output / activity / session', 'result');
+      if (step === 6) add('wait-result', current.file, current.nodes.get('receipt'), 'wait receipt', 'Path + preview', 'result');
+      if (step === 7) add('read-result', current.file, current.nodes.get('full'), 'Result text', 'read(del_demo.out)', 'result');
+      const incoming = [...current.nodes.values()].filter(n => !before.nodes.has(n.id));
+      incoming.forEach(n => n.group.setAttribute('opacity', '.15'));
+      svg.dataset.animating = 'true';
+      const started = performance.now(), duration = 1500;
+      function frame(t) {
+        if (view !== current || !root.isConnected) return;
+        const p = Math.min(1, (t - started) / duration), q = p * p * (3 - 2 * p);
+        for (const { item, from, to } of flights) {
+          const x = from.x + (to.x - from.x) * q;
+          const y = from.y + (to.y - from.y) * q;
+          item.group.setAttribute('transform', 'translate(' + x + ',' + y + ')');
+          item.group.setAttribute('opacity', p > .82 ? Math.max(0, (1 - p) / .18) : 1);
+        }
+        incoming.forEach(n => n.group.setAttribute('opacity', .15 + .85 * q));
+        if (p < 1) raf = requestAnimationFrame(frame);
+        else { incoming.forEach(n => n.group.setAttribute('opacity', '1')); overlay.remove(); svg.dataset.animating = 'false'; raf = null; }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    function save() {
+      if (!stateStore?.setWidgetState) return;
+      const state = { modelContent: { version: 1, view: 'acp-delegate-flow', step, event: stages[step], parentInputs: items().parent.map(i => i.id), childInputs: items().child.map(i => i.id) }, privateContent: { version: 1, step } };
+      signature = JSON.stringify(state);
+      try { Promise.resolve(stateStore.setWidgetState(state)).catch(() => {}); } catch (_) {}
+    }
+    function stop() { playing = false; clearTimeout(timer); timer = null; get('play').textContent = step === 7 ? 'Replay' : 'Play delegation'; get('play').setAttribute('aria-pressed', 'false'); }
+    function go(n, animate = true, persist = true) {
+      const before = view; step = Math.max(0, Math.min(7, Math.round(n))); paint(); if (animate) motion(before); if (persist) save();
+      if (!playing) stop();
+    }
+    function tick() {
+      if (!playing || !root.isConnected) return;
+      if (step === 7) { stop(); save(); return; }
+      go(step + 1, true, false);
+      timer = setTimeout(tick, 1950);
+    }
+    function restore(state) {
+      const p = state?.privateContent;
+      if (p?.version !== 1 || !Number.isInteger(p.step)) return false;
+      stop(); step = Math.max(0, Math.min(7, p.step)); paint(); return true;
+    }
+    slider.addEventListener('input', () => { stop(); go(Number(slider.value)); });
+    get('next').addEventListener('click', () => { stop(); go(step + 1); });
+    get('play').addEventListener('click', () => {
+      if (playing) { stop(); save(); return; }
+      if (step === 7) go(0, false, false);
+      playing = true; get('play').textContent = 'Pause'; get('play').setAttribute('aria-pressed', 'true'); save(); tick();
+    });
+    new ResizeObserver(() => { if (Math.abs(root.getBoundingClientRect().width - lastWidth) > 1) paint(); }).observe(root);
+    window.addEventListener('explainer:set_globals', event => { const state = event.detail?.globals?.widgetState; if (state && JSON.stringify(state) !== signature) restore(state); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && playing) { stop(); save(); } });
+    if (!restore(stateStore?.widgetState)) paint();
+  })();
+  </script>
+</div>
+</section>
+</main>
+<footer>
+  <p>Runs offline. Controls are saved locally when browser storage is available; they never start real agents or write project files.</p>
+  <p>Implementation references: <a href="https://github.com/ranxianglei/billion-context/blob/master/src/decompress-shared.ts">Restore behavior</a> · <a href="https://github.com/ranxianglei/billion-context/blob/master/pi-subagents/src/delegate-tool.ts">Pi subprocess delegation</a></p>
+</footer>
+</body>
+</html>
